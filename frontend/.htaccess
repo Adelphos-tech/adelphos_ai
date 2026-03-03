@@ -1,10 +1,10 @@
 Options -Indexes
 RewriteEngine On
 
-# Serve voice-agent page at /voice-agent
-RewriteRule ^voice-agent/?$ /voice-agent.html [L]
+# Redirect old voice-agent.html to folder URL
+RewriteRule ^voice-agent\.html$ /voice-agent/ [R=301,L]
 
-# Serve index for all other routes
+# Standard fallback
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ /index.html [L]
