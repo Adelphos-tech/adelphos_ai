@@ -244,7 +244,7 @@ async def text_chat(request: dict):
         chat_store[chat_id] = {"messages": []}
 
     history = chat_store[chat_id]["messages"]
-    messages = build_messages(question, history)
+    messages, _ = await build_messages(question, history)
 
     try:
         ai_response = generate_response(messages)
