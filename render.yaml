@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: adelphos-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: VLLM_BASE_URL
+        sync: false
+      - key: VLLM_API_KEY
+        sync: false
+      - key: VLLM_MODEL
+        sync: false
+      - key: TTS_API_URL
+        sync: false
+      - key: TTS_VOICE
+        sync: false

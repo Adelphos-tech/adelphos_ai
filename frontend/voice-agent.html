@@ -434,8 +434,12 @@
 })();
 
 /* ═══════════════ APP STATE ═══════════════ */
-const BASE_PATH = location.pathname.replace(/\/voice-agent\/?$/, '').replace(/\/$/, '') || '';
-const API_URL   = window.location.origin + BASE_PATH;
+// When hosted on Hostinger (static), all API calls go to the Render backend.
+// On localhost the origin itself is the backend.
+const RENDER_BACKEND = 'https://adelphos-backend.onrender.com';
+const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+const BASE_PATH = IS_LOCAL ? (location.pathname.replace(/\/voice-agent\/?$/, '').replace(/\/$/, '') || '') : '';
+const API_URL   = IS_LOCAL ? (window.location.origin + BASE_PATH) : RENDER_BACKEND;
 let chatId = null, mode = 'voice';
 let ws = null, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
 let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null, analyser = null;
@@ -463,8 +467,10 @@ function sendChip(el) {
 
 /* ── WebSocket ── */
 function connectWS() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}${BASE_PATH}/ws/voice`);
+    const wsBase = IS_LOCAL
+        ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${BASE_PATH}`
+        : RENDER_BACKEND.replace(/^https?/, m => m === 'https' ? 'wss' : 'ws');
+    ws = new WebSocket(`${wsBase}/ws/voice`);
     ws.onopen  = () => { setConnStatus('online');  if (chatId) ws.send(JSON.stringify({ type: 'set_chat_id', chat_id: chatId })); };
     ws.onmessage = e => handleWSMsg(JSON.parse(e.data));
     ws.onclose = () => { setConnStatus('offline'); setTimeout(connectWS, 2000); };
