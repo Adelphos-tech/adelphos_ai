@@ -1,0 +1,10 @@
+Options -Indexes
+RewriteEngine On
+
+# Serve voice-agent page at /voice-agent
+RewriteRule ^voice-agent/?$ /voice-agent.html [L]
+
+# Serve index for all other routes
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ /index.html [L]
