@@ -233,7 +233,7 @@ async def voice_pipeline(
 @app.post("/chat")
 async def text_chat(request: dict):
     """Text-based chat endpoint with streaming LLM response."""
-    question = request.get("question", "")
+    question = request.get("message") or request.get("question", "")
     chat_id = request.get("chat_id")
 
     if not question.strip():
