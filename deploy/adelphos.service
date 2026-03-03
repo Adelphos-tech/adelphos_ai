@@ -1,0 +1,15 @@
+[Unit]
+Description=Adelphos Tech - FastAPI Voice Agent
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/var/www/adelphos
+ExecStart=/var/www/adelphos/venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8080
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/var/www/adelphos/.env
+
+[Install]
+WantedBy=multi-user.target
