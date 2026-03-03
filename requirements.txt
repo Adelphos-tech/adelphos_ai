@@ -7,3 +7,6 @@ openai==1.59.5
 deepgram-sdk==3.9.0
 websockets==14.1
 aiofiles==24.1.0
+numpy==1.26.4
+qdrant-client==1.9.1
+sentence-transformers==3.0.1
