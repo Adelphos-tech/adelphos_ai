@@ -436,7 +436,7 @@
 /* ═══════════════ APP STATE ═══════════════ */
 // When hosted on Hostinger (static), all API calls go to the Render backend.
 // On localhost the origin itself is the backend.
-const RENDER_BACKEND = 'https://adelphos-backend.onrender.com';
+const RENDER_BACKEND = 'https://adelphos-new-website.onrender.com';
 const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 const BASE_PATH = IS_LOCAL ? (location.pathname.replace(/\/voice-agent\/?$/, '').replace(/\/$/, '') || '') : '';
 const API_URL   = IS_LOCAL ? (window.location.origin + BASE_PATH) : RENDER_BACKEND;
