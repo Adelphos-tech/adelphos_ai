@@ -11,6 +11,14 @@ import wave
 import struct
 from typing import Optional
 import numpy as np
+
+# Fix macOS SSL certificate verification (needed for Deepgram on local dev)
+try:
+    import certifi
+    os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
+except ImportError:
+    pass
 import websockets as ws_lib
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
