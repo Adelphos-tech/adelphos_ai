@@ -86,6 +86,11 @@ async def voice_agent_page():
     return FileResponse(os.path.join(FRONTEND_DIR, "voice-agent.html"))
 
 
+@app.get("/logo.png")
+async def serve_logo():
+    return FileResponse(os.path.join(FRONTEND_DIR, "logo.png"), media_type="image/png")
+
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
