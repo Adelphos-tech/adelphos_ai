@@ -91,7 +91,12 @@ async def read_root():
 
 @app.get("/voice-agent")
 async def voice_agent_page():
-    return FileResponse(os.path.join(FRONTEND_DIR, "voice-agent.html"))
+    return FileResponse(os.path.join(FRONTEND_DIR, "voice-agent", "index.html"))
+
+
+@app.get("/voice-agent/")
+async def voice_agent_page_slash():
+    return FileResponse(os.path.join(FRONTEND_DIR, "voice-agent", "index.html"))
 
 
 @app.get("/logo.png")
