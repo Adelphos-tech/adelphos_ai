@@ -101,22 +101,6 @@
         }
         .back-btn:hover { border-color: var(--primary); color: var(--primary-light); transform: translateX(-2px); }
 
-        .voice-select-wrap {
-            display: flex; align-items: center; gap: 0.45rem;
-            background: var(--surface-2); border: 1px solid var(--border-light);
-            border-radius: var(--r-sm); padding: 0.3rem 0.75rem;
-            font-size: 0.7rem; font-weight: 600; color: var(--text-sub);
-            transition: border-color 0.18s;
-        }
-        .voice-select-wrap:focus-within { border-color: rgba(99,102,241,0.45); }
-        .voice-select-wrap i { color: var(--primary-light); font-size: 0.7rem; }
-        .voice-select-wrap select {
-            background: none; border: none; outline: none; color: var(--text-sub);
-            font-size: 0.7rem; font-family: inherit; font-weight: 600;
-            cursor: pointer; letter-spacing: 0.02em;
-        }
-        .voice-select-wrap select option { background: #1e293b; color: #f1f5f9; }
-
         /* ── CHAT PANEL ── */
         .chat-panel { display: flex; flex-direction: column; background: var(--bg-2); overflow: hidden; position: relative; }
         .chat {
@@ -343,13 +327,6 @@
                     <i class="fas fa-keyboard"></i> Text
                 </button>
             </div>
-            <div class="voice-select-wrap">
-                <i class="fas fa-user-circle"></i>
-                <select id="voice-select" onchange="onVoiceChange(this.value)" title="Select AI voice">
-                    <option value="otherwavs/habib.wav">Habib</option>
-                    <option value="otherwavs/shivang.wav">Shivang</option>
-                </select>
-            </div>
             <div class="status-pill" id="status-pill">
                 <div class="status-dot" id="status-dot"></div>
                 <span id="status-label">Online</span>
@@ -459,10 +436,8 @@
 /* ═══════════════ APP STATE ═══════════════ */
 // When hosted on Hostinger (static), all API calls go to the Render backend.
 // On localhost the origin itself is the backend.
-const RENDER_BACKEND = 'https://adelphos-new-website.onrender.com';
-const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-const BASE_PATH = IS_LOCAL ? (location.pathname.replace(/\/voice-agent\/?$/, '').replace(/\/$/, '') || '') : '';
-const API_URL   = IS_LOCAL ? (window.location.origin + BASE_PATH) : RENDER_BACKEND;
+const API_URL = window.location.origin;
+
 let chatId = null, mode = 'voice';
 let ws = null, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
 let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null, analyser = null;
@@ -490,16 +465,10 @@ function sendChip(el) {
 
 /* ── WebSocket ── */
 function connectWS() {
-    const wsBase = IS_LOCAL
-        ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${BASE_PATH}`
-        : RENDER_BACKEND.replace(/^https?/, m => m === 'https' ? 'wss' : 'ws');
+    const wsBase = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+
     ws = new WebSocket(`${wsBase}/ws/voice`);
-    ws.onopen  = () => {
-        setConnStatus('online');
-        if (chatId) ws.send(JSON.stringify({ type: 'set_chat_id', chat_id: chatId }));
-        const selVoice = document.getElementById('voice-select');
-        if (selVoice && selVoice.value) ws.send(JSON.stringify({ type: 'set_voice', voice: selVoice.value }));
-    };
+    ws.onopen  = () => { setConnStatus('online');  if (chatId) ws.send(JSON.stringify({ type: 'set_chat_id', chat_id: chatId })); };
     ws.onmessage = e => handleWSMsg(JSON.parse(e.data));
     ws.onclose = () => { setConnStatus('offline'); setTimeout(connectWS, 2000); };
     ws.onerror = err => console.error('[WS]', err);
@@ -746,13 +715,6 @@ function removeTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } 
 
 function showProc(msg) { processingTxt.textContent = msg || 'Processing…'; processingOvl.classList.remove('hidden'); }
 function hideProc()     { processingOvl.classList.add('hidden'); }
-
-/* ── Voice Selection ── */
-function onVoiceChange(voice) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'set_voice', voice: voice }));
-    }
-}
 
 /* ── Boot ── */
 connectWS();
