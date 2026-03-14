@@ -126,6 +126,7 @@ async def get_chat(chat_id: str):
 async def voice_pipeline(
     audio: UploadFile = File(...),
     chat_id: Optional[str] = Form(None),
+    voice: Optional[str] = Form(None),
 ):
     """
     Full voice pipeline:
@@ -188,8 +189,10 @@ async def voice_pipeline(
     history.append({"role": "assistant", "content": ai_response})
 
     # 5. TTS
+    ALLOWED_VOICES = {"otherwavs/habib.wav", "otherwavs/shivang.wav"}
+    tts_voice = voice if voice in ALLOWED_VOICES else None
     try:
-        tts_audio = await text_to_speech(ai_response)
+        tts_audio = await text_to_speech(ai_response, tts_voice)
         if not tts_audio:
             return Response(
                 content=json.dumps({
@@ -371,6 +374,7 @@ class VoiceSession:
         self.barged_in = False
         self._cancelled = False
         self.turn_count = 0          # track conversation turns for filler logic
+        self.voice = os.getenv("TTS_VOICE", "rizwan.wav")  # selected TTS voice
 
     def cancel(self):
         self._cancelled = True
@@ -431,18 +435,26 @@ async def voice_ws(ws: WebSocket):
         await ws.send_json({"type": "status", "status": "thinking"})
 
         # ── Send a filler phrase to cover LLM+TTS latency (skip first turn — greeting) ──
-        if filler_cache and not session.barged_in and session.turn_count > 0:
-            _pool = filler_cache_general if filler_cache_general else filler_cache
-            filler_audio = random.choice(_pool)
-            await ws.send_json({"type": "status", "status": "speaking"})
-            session.is_ai_speaking = True
-            await ws.send_json({
-                "type": "ai_audio",
-                "data": base64.b64encode(filler_audio).decode(),
-                "sentence_idx": -1,
-                "is_filler": True,
-            })
-            print(f"[WS] Filler sent at {_time.time()-t0:.2f}s")
+        if not session.barged_in and session.turn_count > 0:
+            filler_audio = None
+            try:
+                filler_text = random.choice(FILLER_PHRASES_GENERAL)
+                filler_audio = await tts_sentence(filler_text, voice=session.voice)
+            except Exception:
+                pass
+            if not filler_audio and filler_cache:
+                _pool = filler_cache_general if filler_cache_general else filler_cache
+                filler_audio = random.choice(_pool)
+            if filler_audio:
+                await ws.send_json({"type": "status", "status": "speaking"})
+                session.is_ai_speaking = True
+                await ws.send_json({
+                    "type": "ai_audio",
+                    "data": base64.b64encode(filler_audio).decode(),
+                    "sentence_idx": -1,
+                    "is_filler": True,
+                })
+                print(f"[WS] Filler sent at {_time.time()-t0:.2f}s")
         session.turn_count += 1
 
         history = chat_store[session.chat_id]["messages"]
@@ -503,7 +515,7 @@ async def voice_ws(ws: WebSocket):
         print(f"[WS] LLM done at {_time.time()-t0:.2f}s, {len(clean)} chars — calling TTS")
 
         if clean and not session.barged_in:
-            tts_task = asyncio.ensure_future(tts_sentence(clean))
+            tts_task = asyncio.ensure_future(tts_sentence(clean, voice=session.voice))
             while not tts_task.done():
                 if session.barged_in:
                     tts_task.cancel()
@@ -737,7 +749,7 @@ async def voice_ws(ws: WebSocket):
     async def _send_greeting():
         greeting_text = "Hello! I'm Alex from Adelphos Tech. How can I help you today?"
         try:
-            greeting_audio = await tts_sentence(greeting_text)
+            greeting_audio = await tts_sentence(greeting_text, voice=session.voice)
             if greeting_audio:
                 await ws.send_json({"type": "status", "status": "speaking"})
                 session.is_ai_speaking = True
@@ -805,6 +817,14 @@ async def voice_ws(ws: WebSocket):
                     if cid and cid in chat_store:
                         session.chat_id = cid
                     await ws.send_json({"type": "status", "status": "ready", "chat_id": session.chat_id})
+
+                elif msg_type == "set_voice":
+                    voice = msg.get("voice", "").strip()
+                    ALLOWED_VOICES = {"otherwavs/habib.wav", "otherwavs/shivang.wav"}
+                    if voice in ALLOWED_VOICES:
+                        session.voice = voice
+                        print(f"[WS] Voice changed to: {voice}")
+                    await ws.send_json({"type": "voice_ack", "voice": session.voice})
 
                 elif msg_type == "barge_in":
                     print("[WS] Barge-in received")
