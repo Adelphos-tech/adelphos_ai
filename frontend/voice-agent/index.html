@@ -459,10 +459,7 @@
 /* ═══════════════ APP STATE ═══════════════ */
 // When hosted on Hostinger (static), all API calls go to the Render backend.
 // On localhost the origin itself is the backend.
-const RENDER_BACKEND = 'https://adelphos-new-website.onrender.com';
-const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-const BASE_PATH = IS_LOCAL ? (location.pathname.replace(/\/voice-agent\/?$/, '').replace(/\/$/, '') || '') : '';
-const API_URL   = IS_LOCAL ? (window.location.origin + BASE_PATH) : RENDER_BACKEND;
+const API_URL = window.location.origin;
 let chatId = null, mode = 'voice';
 let ws = null, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
 let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null, analyser = null;
@@ -490,9 +487,7 @@ function sendChip(el) {
 
 /* ── WebSocket ── */
 function connectWS() {
-    const wsBase = IS_LOCAL
-        ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}${BASE_PATH}`
-        : RENDER_BACKEND.replace(/^https?/, m => m === 'https' ? 'wss' : 'ws');
+   const wsBase = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
     ws = new WebSocket(`${wsBase}/ws/voice`);
     ws.onopen  = () => {
         setConnStatus('online');
