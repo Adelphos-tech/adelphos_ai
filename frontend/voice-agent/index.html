@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Voice Agent Demo — Adelphos Tech</title>
+    <title>Property Search via Voice — Adelphos Tech</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -309,12 +309,78 @@
 
         .hidden { display: none !important; }
 
+        /* ── PROPERTY CARDS ── */
+        .property-cards {
+            display: flex; flex-direction: column; gap: 0.5rem;
+            margin-top: 0.5rem; width: 100%;
+        }
+        .prop-card {
+            display: flex; gap: 0.85rem; align-items: flex-start;
+            background: var(--surface); border: 1px solid var(--border-light);
+            border-radius: var(--r-lg); padding: 0.75rem; cursor: pointer;
+            transition: all 0.2s; text-decoration: none; color: inherit;
+            animation: msgIn 0.3s cubic-bezier(.34,1.56,.64,1);
+        }
+        .prop-card:hover {
+            border-color: rgba(99,102,241,0.45);
+            background: rgba(99,102,241,0.06);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+        }
+        .prop-img {
+            width: 90px; height: 70px; border-radius: var(--r-sm);
+            object-fit: cover; flex-shrink: 0; background: var(--surface-2);
+            display: flex; align-items: center; justify-content: center;
+            color: var(--text-muted); font-size: 1.4rem;
+            border: 1px solid var(--border);
+        }
+        .prop-img img {
+            width: 100%; height: 100%; object-fit: cover; border-radius: var(--r-sm);
+        }
+        .prop-info { flex: 1; min-width: 0; }
+        .prop-title {
+            font-size: 0.82rem; font-weight: 600; color: var(--text);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            margin-bottom: 0.25rem;
+        }
+        .prop-meta {
+            display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.3rem;
+        }
+        .prop-badge {
+            font-size: 0.62rem; font-weight: 600; padding: 0.18rem 0.5rem;
+            border-radius: 50px; letter-spacing: 0.03em;
+        }
+        .badge-sale   { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+        .badge-rent   { background: rgba(6,182,212,0.12);  color: #06b6d4; border: 1px solid rgba(6,182,212,0.2); }
+        .badge-type   { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border-light); }
+        .prop-price {
+            font-size: 0.88rem; font-weight: 700;
+            color: var(--primary-light); margin-bottom: 0.2rem;
+        }
+        .prop-details {
+            font-size: 0.68rem; color: var(--text-muted);
+            display: flex; gap: 0.6rem; flex-wrap: wrap;
+        }
+        .prop-details span { display: flex; align-items: center; gap: 0.25rem; }
+        .prop-link {
+            font-size: 0.62rem; color: var(--primary-light);
+            display: flex; align-items: center; gap: 0.25rem; margin-top: 0.3rem;
+            opacity: 0.75;
+        }
+        .prop-link:hover { opacity: 1; }
+        .cards-label {
+            font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.05em;
+            text-transform: uppercase; font-weight: 600; margin-bottom: 0.1rem;
+            padding: 0 2px;
+        }
+
         @media (max-width: 600px) {
             .header { padding: 0 1rem; }
             .header-tagline, .header-divider { display: none; }
             .chat { padding: 1rem; }
             .msg { max-width: 92%; }
             .orb { width: 86px; height: 86px; font-size: 2rem; }
+            .prop-img { width: 70px; height: 56px; }
         }
     </style>
 </head>
@@ -331,7 +397,7 @@
             </a>
             <div class="header-divider"></div>
             <div class="header-tagline">
-                <i class="fas fa-microphone-lines"></i>&nbsp;AI Voice Agent Demo
+                <i class="fas fa-building"></i>&nbsp;Property Search via Voice
             </div>
         </div>
         <div class="header-right">
@@ -371,14 +437,14 @@
                     <div class="orb"><i class="fas fa-headset"></i></div>
                 </div>
                 <h3>Hi, I'm Alex</h3>
-                <p class="sub">Your AI technology consultant from Adelphos Tech. Ask me about our services, tech stack, hiring models, or how to build your next product.</p>
+                <p class="sub">Your Singapore property consultant. Ask me to find properties by location, budget, type, or bedrooms — in any currency.</p>
                 <div class="chip-row">
-                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-mobile-alt"></i>Mobile app dev</span>
-                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-layer-group"></i>Your tech stack</span>
-                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-users"></i>Hiring models</span>
-                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-clock"></i>Project timeline</span>
-                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-code"></i>Custom software</span>
-                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-dollar-sign"></i>Pricing &amp; cost</span>
+                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-home"></i>3 bedroom condo for sale</span>
+                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-map-marker-alt"></i>Orchard apartments</span>
+                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-dollar-sign"></i>HDB under 600K SGD</span>
+                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-building"></i>Punggol flats for rent</span>
+                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-star"></i>Landed property in D10</span>
+                    <span class="chip" onclick="sendChip(this)"><i class="fas fa-exchange-alt"></i>What is 800K SGD in USD</span>
                 </div>
             </div>
 
@@ -508,6 +574,7 @@ function handleWSMsg(msg) {
         case 'interim_transcript':  showInterim(msg.text); break;
         case 'barge_in_ack':        break;
         case 'status':              handleStatus(msg.status); break;
+        case 'properties':          renderPropertyCards(msg.data); break;
         case 'error':               hideProc(); removeTyping(); isProcessing = false; addMsg('Error: ' + msg.message, 'assistant'); break;
     }
 }
@@ -714,6 +781,7 @@ async function sendText() {
         const d = await r.json(); removeTyping();
         if (d.response)  { addMsg(d.response, 'assistant'); chatId = d.chat_id || chatId; }
         else if (d.error){ addMsg('Error: ' + d.error, 'assistant'); }
+        if (d.properties && d.properties.length) renderPropertyCards(d.properties);
     } catch (e) { removeTyping(); addMsg('Could not connect to the server. Please try again.', 'assistant'); }
 }
 
@@ -729,6 +797,68 @@ function addMsg(text, role) {
 }
 
 function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ── Property Cards ── */
+function renderPropertyCards(properties) {
+    if (!properties || !properties.length) return;
+    hideEmpty();
+
+    const wrap = document.createElement('div');
+    wrap.className = 'msg assistant';
+    wrap.style.maxWidth = '100%';
+
+    const label = document.createElement('div');
+    label.className = 'cards-label';
+    label.innerHTML = `<i class="fas fa-building" style="color:var(--primary-light)"></i> &nbsp;${properties.length} Matching Listing${properties.length > 1 ? 's' : ''}`;
+
+    const cards = document.createElement('div');
+    cards.className = 'property-cards';
+
+    properties.forEach(p => {
+        const isRent = (p.category || '').toLowerCase().includes('rent');
+        const badgeClass = isRent ? 'badge-rent' : 'badge-sale';
+        const badgeLabel = isRent ? 'For Rent' : 'For Sale';
+        const price = p.price_raw || p.display_price || 'Price on request';
+        const beds  = p.bedrooms !== '' && p.bedrooms !== undefined ? `<span><i class="fas fa-bed"></i> ${p.bedrooms} bed</span>` : '';
+        const baths = p.bathrooms ? `<span><i class="fas fa-bath"></i> ${p.bathrooms} bath</span>` : '';
+        const area  = p.floor_area_raw || (p.floor_area ? p.floor_area + ' sqft' : '');
+        const areaHtml = area ? `<span><i class="fas fa-ruler-combined"></i> ${escHtml(area)}</span>` : '';
+        const district = p.district ? `<span><i class="fas fa-map-marker-alt"></i> ${escHtml(p.district)}</span>` : '';
+        const ptype = p.property_type && p.property_type !== p.title ? `<span class="prop-badge badge-type">${escHtml(p.property_type)}</span>` : '';
+
+        const card = document.createElement('a');
+        card.className = 'prop-card';
+        card.href = p.url || '#';
+        card.target = p.url ? '_blank' : '_self';
+        card.rel = 'noopener noreferrer';
+
+        card.innerHTML = `
+            <div class="prop-img">
+                ${p.image_url
+                    ? `<img src="${escHtml(p.image_url)}" alt="${escHtml(p.title)}" onerror="this.parentElement.innerHTML='<i class=\'fas fa-building\'></i>'">`
+                    : '<i class="fas fa-building"></i>'}
+            </div>
+            <div class="prop-info">
+                <div class="prop-title">${escHtml(p.title || 'Property Listing')}</div>
+                <div class="prop-meta">
+                    <span class="prop-badge ${badgeClass}">${badgeLabel}</span>
+                    ${ptype}
+                </div>
+                <div class="prop-price">${escHtml(price)}</div>
+                <div class="prop-details">
+                    ${beds}${baths}${areaHtml}${district}
+                </div>
+                ${p.url ? '<div class="prop-link"><i class="fas fa-external-link-alt"></i> View listing</div>' : ''}
+            </div>`;
+
+        cards.appendChild(card);
+    });
+
+    wrap.appendChild(label);
+    wrap.appendChild(cards);
+    chatEl.appendChild(wrap);
+    chatEl.scrollTop = chatEl.scrollHeight;
+}
 
 let typingEl = null;
 function addTyping() {

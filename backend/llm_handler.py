@@ -17,10 +17,11 @@ SYSTEM_PROMPT = """You are Alex, a friendly and knowledgeable Singapore property
 
 About your role:
 - You help clients find properties in Singapore — HDB flats, condos, landed homes, and more
-- You have access to live property listings from PropertyGuru Singapore
-- Properties are listed in SGD (Singapore Dollars)
+- You have access to live Singapore property listings
+- Properties are listed in SGD (Singapore Dollars) by default
 - You understand Singapore's property market: districts (D1-D28), HDB, EC, freehold vs leasehold
 - You know Singapore neighborhoods well: Orchard, Marina Bay, CBD, Punggol, Tampines, Jurong, Bukit Timah, Holland, Katong, Woodlands, etc.
+- If the user asks for the price in another currency (USD, EUR, GBP, AUD, INR, MYR, etc.), convert it using the approximate current rate provided in the context and state both the SGD and converted amount naturally
 
 Your personality:
 - Warm, genuine, and conversational — like a trusted local property agent
@@ -39,8 +40,10 @@ Speech rules — critical because this is voice:
 When property listings are provided as context:
 - Refer to them naturally in conversation, mentioning title, price in SGD, bedrooms, location, and size
 - Say prices naturally: "SGD 650,000" as "six hundred fifty thousand Singapore dollars" or just "650K SGD"
-- Mention the PropertyGuru link if the client wants more details
+- If currency conversion rates are provided in context, convert and mention both: "that's about 480,000 US dollars"
+- Mention the listing link if the client wants more details
 - If multiple listings match, mention the top 2-3 naturally and ask what fits best
+- Property cards with images will be shown to the user automatically — you don't need to describe images
 
 When asked about property types:
 - HDB: public housing, most affordable, great for citizens/PRs
@@ -57,7 +60,7 @@ When asked about districts:
 
 When greeted:
 - Greet back warmly and introduce yourself in one natural sentence
-- Example: "Hey, great to connect — I'm Alex, your Singapore property consultant, how can I help you today?"""""
+- Example: "Hey, great to connect — I'm Alex, your Singapore property consultant, how can I help you find your ideal property today?"""""
 
 
 def generate_response(messages: list[dict], max_tokens: int = 300, temperature: float = 0.7) -> str:
@@ -98,6 +101,51 @@ def generate_response_stream(messages: list[dict], max_tokens: int = 120, temper
         raise
 
 
+# Approximate SGD exchange rates (update periodically or fetch live)
+SGD_RATES = {
+    "USD": 0.74,
+    "EUR": 0.68,
+    "GBP": 0.58,
+    "AUD": 1.14,
+    "INR": 61.5,
+    "MYR": 3.32,
+    "HKD": 5.78,
+    "JPY": 111.0,
+    "CNY": 5.37,
+    "CAD": 1.01,
+    "AED": 2.72,
+    "THB": 26.5,
+    "IDR": 11800,
+    "PHP": 43.5,
+}
+
+CURRENCY_KEYWORDS = {
+    "dollar": "USD", "usd": "USD", "us dollar": "USD",
+    "euro": "EUR", "eur": "EUR",
+    "pound": "GBP", "gbp": "GBP", "sterling": "GBP",
+    "aud": "AUD", "australian": "AUD",
+    "rupee": "INR", "inr": "INR", "indian": "INR",
+    "ringgit": "MYR", "myr": "MYR", "malaysian": "MYR",
+    "hkd": "HKD", "hong kong": "HKD",
+    "yen": "JPY", "jpy": "JPY",
+    "yuan": "CNY", "rmb": "CNY", "cny": "CNY",
+    "cad": "CAD", "canadian": "CAD",
+    "dirham": "AED", "aed": "AED",
+    "baht": "THB", "thb": "THB",
+    "rupiah": "IDR", "idr": "IDR",
+    "peso": "PHP", "php": "PHP",
+}
+
+
+def _detect_currency_request(text: str) -> str | None:
+    """Detect if user is asking for a currency conversion."""
+    t = text.lower()
+    for kw, code in CURRENCY_KEYWORDS.items():
+        if kw in t:
+            return code
+    return None
+
+
 async def build_messages(user_text: str, chat_history: list[dict] = None) -> tuple[list[dict], list[dict]]:
     """
     Build the messages array for the LLM with system prompt and optional chat history.
@@ -114,6 +162,13 @@ async def build_messages(user_text: str, chat_history: list[dict] = None) -> tup
         for msg in recent:
             if msg.get("role") in ["user", "assistant"] and msg.get("content"):
                 messages.append({"role": msg["role"], "content": msg["content"]})
+
+    # Inject currency context if user asked for conversion
+    currency_code = _detect_currency_request(user_text)
+    if currency_code and currency_code in SGD_RATES:
+        rate = SGD_RATES[currency_code]
+        currency_context = f"[Currency context: 1 SGD = {rate} {currency_code}. Use this rate to convert SGD prices if the user asks.]"
+        messages.append({"role": "system", "content": currency_context})
 
     messages.append({"role": "user", "content": user_text})
     print(f"[LLM] build_messages total: {int((_time.time()-t0)*1000)}ms")

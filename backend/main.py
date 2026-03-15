@@ -32,6 +32,7 @@ from backend.stt_handler import transcribe_audio, correct_transcript, TECH_KEYWO
 from backend.tts_handler import text_to_speech, tts_sentence, get_available_voices
 import httpx
 from backend.llm_handler import generate_response, generate_response_stream, build_messages
+from backend.qdrant_handler import search_properties, format_properties_for_llm
 
 app = FastAPI(title="Adelphos Tech")
 
@@ -251,9 +252,23 @@ async def voice_pipeline(
 
 # ─── Text-only chat (for typing mode) ───
 
+PROPERTY_TRIGGERS = [
+    "property", "properties", "flat", "apartment", "condo", "hdb", "landed",
+    "bedroom", "bedrooms", "br", "bhk", "studio", "penthouse", "bungalow",
+    "rent", "rental", "buy", "sale", "for sale", "for rent",
+    "district", "location", "price", "budget", "sgd", "house", "home",
+    "show me", "find me", "looking for", "available", "listing",
+]
+
+def _is_property_query(text: str) -> bool:
+    """Detect if user is asking about properties."""
+    t = text.lower()
+    return any(kw in t for kw in PROPERTY_TRIGGERS)
+
+
 @app.post("/chat")
 async def text_chat(request: dict):
-    """Text-based chat endpoint with streaming LLM response."""
+    """Text-based chat endpoint with property search and LLM response."""
     question = request.get("message") or request.get("question", "")
     chat_id = request.get("chat_id")
 
@@ -265,7 +280,22 @@ async def text_chat(request: dict):
         chat_store[chat_id] = {"messages": []}
 
     history = chat_store[chat_id]["messages"]
-    messages, _ = await build_messages(question, history)
+
+    # Search properties if relevant
+    properties = []
+    property_context = ""
+    if _is_property_query(question):
+        try:
+            properties = await search_properties(question, limit=4)
+            if properties:
+                property_context = format_properties_for_llm(properties)
+        except Exception as e:
+            print(f"[CHAT] Property search error: {e}")
+
+    messages, _ = await build_messages(
+        question + (f"\n\n[Available listings:\n{property_context}]" if property_context else ""),
+        history
+    )
 
     try:
         ai_response = generate_response(messages)
@@ -279,6 +309,7 @@ async def text_chat(request: dict):
     return {
         "response": ai_response,
         "chat_id": chat_id,
+        "properties": properties,
     }
 
 
@@ -464,8 +495,29 @@ async def voice_ws(ws: WebSocket):
 
         history = chat_store[session.chat_id]["messages"]
         t_build = _time.time()
-        messages, _ = await build_messages(user_text, history)
+
+        # ── Property search in parallel with LLM build ──
+        properties = []
+        property_context = ""
+        if _is_property_query(user_text):
+            try:
+                properties = await search_properties(user_text, limit=4)
+                if properties:
+                    property_context = format_properties_for_llm(properties)
+                    print(f"[WS] Found {len(properties)} properties")
+            except Exception as e:
+                print(f"[WS] Property search error: {e}")
+
+        augmented_text = user_text + (f"\n\n[Available listings:\n{property_context}]" if property_context else "")
+        messages, _ = await build_messages(augmented_text, history)
         print(f"[WS] build_messages took {int((_time.time()-t_build)*1000)}ms")
+
+        # ── Send property cards to frontend if found ──
+        if properties:
+            try:
+                await ws.send_json({"type": "properties", "data": properties})
+            except Exception:
+                pass
 
         # ── Stream full LLM response ──
         full_response = ""
