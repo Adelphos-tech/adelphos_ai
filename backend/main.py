@@ -812,7 +812,7 @@ async def voice_ws(ws: WebSocket):
 
     # ── Send greeting audio to the user on connect ──
     async def _send_greeting():
-        greeting_text = "Hi, I'm Alex. How can I help?"
+        greeting_text = "Hey there, I'm Alex from Adelphos. Looking for a property in Singapore today?"
         try:
             greeting_audio = await tts_sentence(greeting_text, voice=session.voice)
             if greeting_audio:

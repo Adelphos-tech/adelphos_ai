@@ -330,6 +330,17 @@
             transform: translateY(-2px);
             box-shadow: 0 6px 24px rgba(0,0,0,0.3);
         }
+        .prop-card.highlight {
+            border-color: rgba(99,102,241,0.7);
+            background: rgba(99,102,241,0.12);
+            box-shadow: 0 0 0 3px rgba(99,102,241,0.2), 0 8px 32px rgba(0,0,0,0.4);
+            transform: scale(1.02);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(99,102,241,0.2), 0 8px 32px rgba(0,0,0,0.4); }
+            50% { box-shadow: 0 0 0 3px rgba(99,102,241,0.4), 0 8px 32px rgba(0,0,0,0.5); }
+        }
         .prop-img {
             width: 90px; height: 70px; border-radius: var(--r-sm);
             object-fit: cover; flex-shrink: 0; background: var(--surface-2);
@@ -576,7 +587,7 @@ function connectWS() {
 function handleWSMsg(msg) {
     switch (msg.type) {
         case 'user_text':           clearInterim(); hideProc(); addMsg(msg.text, 'user'); break;
-        case 'ai_text':             removeTyping(); hideProc(); addMsg(msg.text, 'assistant'); chatId = msg.chat_id || chatId; break;
+        case 'ai_text':             removeTyping(); hideProc(); addMsg(msg.text, 'assistant'); highlightPropertyMentions(msg.text); chatId = msg.chat_id || chatId; break;
         case 'ai_audio':            handleAudioMsg(msg); break;
         case 'interim_transcript':  showInterim(msg.text); break;
         case 'barge_in_ack':        break;
@@ -863,7 +874,7 @@ function renderPropertyCards(properties) {
     const cards = document.createElement('div');
     cards.className = 'property-cards';
 
-    properties.forEach(p => {
+    properties.forEach((p, idx) => {
         const isRent = (p.category || '').toLowerCase().includes('rent');
         const badgeClass = isRent ? 'badge-rent' : 'badge-sale';
         const badgeLabel = isRent ? 'For Rent' : 'For Sale';
@@ -877,6 +888,9 @@ function renderPropertyCards(properties) {
 
         const card = document.createElement('a');
         card.className = 'prop-card';
+        card.setAttribute('data-property-id', idx);
+        card.setAttribute('data-property-title', (p.title || '').toLowerCase());
+        card.setAttribute('data-property-location', (p.district || p.location || '').toLowerCase());
         card.href = p.url || '#';
         card.target = p.url ? '_blank' : '_self';
         card.rel = 'noopener noreferrer';
@@ -917,6 +931,38 @@ function addTyping() {
     chatEl.appendChild(typingEl); chatEl.scrollTop = chatEl.scrollHeight;
 }
 function removeTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
+
+/* ── Property Highlighting ── */
+function highlightPropertyMentions(text) {
+    // Clear previous highlights
+    document.querySelectorAll('.prop-card.highlight').forEach(c => c.classList.remove('highlight'));
+    
+    if (!text) return;
+    const lower = text.toLowerCase();
+    
+    // Find all property cards
+    const cards = document.querySelectorAll('.prop-card');
+    if (!cards.length) return;
+    
+    // Highlight cards mentioned in the text
+    cards.forEach(card => {
+        const title = card.getAttribute('data-property-title') || '';
+        const location = card.getAttribute('data-property-location') || '';
+        
+        // Check if property title or location is mentioned
+        const titleWords = title.split(/\s+/).filter(w => w.length > 3);
+        const locationWords = location.split(/\s+/).filter(w => w.length > 3);
+        
+        const mentioned = titleWords.some(w => lower.includes(w)) || 
+                         locationWords.some(w => lower.includes(w));
+        
+        if (mentioned) {
+            card.classList.add('highlight');
+            // Auto-remove highlight after 8 seconds
+            setTimeout(() => card.classList.remove('highlight'), 8000);
+        }
+    });
+}
 
 function showProc(msg) { processingTxt.textContent = msg || 'Processing…'; processingOvl.classList.remove('hidden'); }
 function hideProc()     { processingOvl.classList.add('hidden'); }
