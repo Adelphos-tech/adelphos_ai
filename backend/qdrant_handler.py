@@ -20,7 +20,7 @@ APIL_PROPERTY_API = "https://admin.apilproperties.com/api/property/"
 load_dotenv()
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "properties_collection")
+COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 
 # Initialize once at import time — async client for non-blocking search
