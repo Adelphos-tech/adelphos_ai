@@ -592,7 +592,7 @@ function handleWSMsg(msg) {
         case 'ai_text':             removeTyping(); hideProc(); addMsg(msg.text, 'assistant'); highlightPropertyMentions(msg.text); chatId = msg.chat_id || chatId; break;
         case 'ai_audio':            handleAudioMsg(msg); break;
         case 'interim_transcript':  showInterim(msg.text); break;
-        case 'barge_in_ack':        break;
+        case 'barge_in_ack':        stopAI(); clearInterim(); break;
         case 'status':              handleStatus(msg.status); break;
         case 'properties':          renderPropertyCards(msg.data); break;
         case 'error':               hideProc(); removeTyping(); isProcessing = false; addMsg('Error: ' + msg.message, 'assistant'); break;
