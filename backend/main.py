@@ -512,14 +512,20 @@ async def voice_ws(ws: WebSocket):
         # ── Property search in parallel with LLM build ──
         properties = []
         property_context = ""
-        if _is_property_query(user_text):
+        is_prop_query = _is_property_query(user_text)
+        print(f"[WS] Is property query: {is_prop_query} for '{user_text}'")
+        if is_prop_query:
             try:
+                print(f"[WS] Searching properties for: '{user_text}'")
                 properties = await search_properties(user_text, limit=4)
+                print(f"[WS] Search returned {len(properties)} properties")
                 if properties:
                     property_context = format_properties_for_llm(properties)
-                    print(f"[WS] Found {len(properties)} properties")
+                    print(f"[WS] Formatted property context: {len(property_context)} chars")
             except Exception as e:
                 print(f"[WS] Property search error: {e}")
+                import traceback
+                traceback.print_exc()
 
         augmented_text = user_text + (f"\n\n[Available listings:\n{property_context}]" if property_context else "")
         messages, _ = await build_messages(augmented_text, history)
