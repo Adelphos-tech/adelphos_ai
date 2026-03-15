@@ -219,7 +219,8 @@ async def search_properties(query: str, limit: int = 5) -> list[dict]:
     filters = _extract_filters(query)
     qdrant_filter = _build_qdrant_filter(filters)
 
-    results = await _client.search(
+    client = _get_client()
+    results = await client.search(
         collection_name=COLLECTION_NAME,
         query_vector=vector,
         query_filter=qdrant_filter,
@@ -230,7 +231,7 @@ async def search_properties(query: str, limit: int = 5) -> list[dict]:
     # Fallback to unfiltered if too few results
     if len(results) < 2 and qdrant_filter:
         print(f"[QDRANT] Filtered search returned {len(results)}, falling back to unfiltered")
-        results = await _client.search(
+        results = await client.search(
             collection_name=COLLECTION_NAME,
             query_vector=vector,
             limit=limit * 3,
