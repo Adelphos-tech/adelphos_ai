@@ -618,7 +618,16 @@ function handleWSMsg(msg) {
 
 function handleStatus(s) {
     if (s === 'thinking') { addTyping(); }
-    else if (s === 'ready') { removeTyping(); isProcessing = false; isAISpeaking = false; isListening = callActive; updateMicUI(); }
+    else if (s === 'ready') {
+        removeTyping(); isProcessing = false;
+        // DON'T reset isAISpeaking here — let audio queue manage it
+        // (backend sends 'ready' after chunks are sent, but playback continues)
+        if (!qRunning && !slots.length && !curSrc) {
+            isAISpeaking = false;
+            isListening = callActive;
+            updateMicUI();
+        }
+    }
 }
 
 function setConnStatus(s) {
@@ -690,7 +699,13 @@ function drainQ(g) {
 function playNext(g) {
     if (playGen !== g) { qRunning = false; return; }
     while (slots.length && slots[0].ready && !slots[0].buf) slots.shift();
-    if (!slots.length) { qRunning = false; return; }
+    if (!slots.length) {
+        qRunning = false;
+        // Audio queue empty — NOW mark AI as not speaking
+        console.log('[audio] queue empty, isAISpeaking → false');
+        isAISpeaking = false; isListening = callActive; updateMicUI();
+        return;
+    }
     const s = slots[0]; if (!s.ready) { qRunning = false; return; } slots.shift();
     const ctx = getPlayCtx(); curSrc = ctx.createBufferSource(); curSrc.buffer = s.buf;
     curSrc.connect(ctx.destination);
