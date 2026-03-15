@@ -292,8 +292,9 @@ async def search_properties(query: str, limit: int = 5) -> list[dict]:
             "agent_name": p.get("agent_name", ""),
             "agent_agency": p.get("agent_agency", ""),
             "description": (p.get("description", "") or "")[:300],
-            "image_url": next((u for u in (p.get("all_image_urls") or []) if "/agent/" not in u), p.get("image_url", "")),
+            "image_url": next((u for u in (p.get("all_image_urls") or []) if "/agent/" not in u), ""),
             "all_image_urls": [u for u in (p.get("all_image_urls") or []) if "/agent/" not in u],
+            "agent_image": next((u for u in (p.get("all_image_urls") or []) if "/agent/" in u), p.get("image_url", "")),
             "url": p.get("url", ""),
             "score": round(hit.score, 3),
         }
