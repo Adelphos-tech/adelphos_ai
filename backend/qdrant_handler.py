@@ -14,27 +14,43 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 
-# Initialize once at import time — async client for non-blocking search
-_client = AsyncQdrantClient(url=QDRANT_URL)
-_model = SentenceTransformer(EMBED_MODEL)
+# Lazy-initialized globals — deferred until first use so the app binds the port fast
+_client: AsyncQdrantClient | None = None
+_model: SentenceTransformer | None = None
+_model_lock = asyncio.Lock()
 
-print(f"[QDRANT] Connected to {QDRANT_URL}, collection={COLLECTION_NAME}, model={EMBED_MODEL}")
+
+def _get_client() -> AsyncQdrantClient:
+    global _client
+    if _client is None:
+        _client = AsyncQdrantClient(url=QDRANT_URL)
+        print(f"[QDRANT] Client connected to {QDRANT_URL}")
+    return _client
+
+
+async def _get_model() -> SentenceTransformer:
+    global _model
+    if _model is None:
+        async with _model_lock:
+            if _model is None:
+                print(f"[QDRANT] Loading embedding model {EMBED_MODEL}...")
+                t0 = _time.time()
+                loop = asyncio.get_event_loop()
+                _model = await loop.run_in_executor(None, SentenceTransformer, EMBED_MODEL)
+                print(f"[QDRANT] Model loaded in {int((_time.time()-t0)*1000)}ms")
+    return _model
 
 
 @lru_cache(maxsize=256)
 def _encode_cached(text: str) -> tuple:
     """CPU-bound embedding with LRU cache. Returns tuple (hashable) for caching."""
+    assert _model is not None, "Model not loaded yet"
     return tuple(_model.encode(text).tolist())
-
-
-# Warmup: pre-compute one embedding to JIT-compile model internals
-_warmup_start = _time.time()
-_encode_cached("warmup query for Singapore property search")
-print(f"[QDRANT] Model warmed up in {int((_time.time()-_warmup_start)*1000)}ms")
 
 
 async def _encode_async(text: str) -> list[float]:
     """Run SentenceTransformer encoding in thread executor to avoid blocking."""
+    await _get_model()  # ensure model loaded
     loop = asyncio.get_event_loop()
     vec = await loop.run_in_executor(None, _encode_cached, text)
     return list(vec)
