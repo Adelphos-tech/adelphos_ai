@@ -795,10 +795,9 @@ async def voice_ws(ws: WebSocket):
                 except Exception:
                     pass
 
-    # ── Open Deepgram eagerly on connect (not lazily on first PCM frame) ──
-    await open_deepgram()
-
-    # Start Deepgram reader + keepalive tasks
+    # ── Deepgram opened lazily on first PCM frame (not eagerly on connect) ──
+    # Eager open causes Deepgram to timeout+close when no audio arrives (page load),
+    # triggering WS onclose → reconnect → infinite loop before user clicks mic.
     dg_reader_task = asyncio.create_task(deepgram_reader())
     asyncio.create_task(deepgram_keepalive())
 
