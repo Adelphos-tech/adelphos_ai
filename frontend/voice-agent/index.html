@@ -620,25 +620,40 @@ function handleAudioMsg(msg) {
     if (!audioChunks[key]) audioChunks[key] = { parts: new Array(total), received: 0, total };
     audioChunks[key].parts[idx] = msg.data;
     audioChunks[key].received++;
+    console.log(`[audio] chunk ${idx+1}/${total} for sentence ${key}`);
     if (audioChunks[key].received === total) {
         // All chunks received — concatenate and play
         const joined = audioChunks[key].parts.join('');
         delete audioChunks[key];
+        console.log(`[audio] all chunks received, playing ${joined.length} b64 chars`);
         playB64(joined, msg.is_filler);
     }
 }
 function playB64(b64, isFiller) {
+    console.log(`[audio] playB64 called: ${b64.length} b64 chars, isFiller=${isFiller}`);
     if (!isFiller) { isListening = false; isAISpeaking = true; updateMicUI(); startBargeMonitor(); }
     const sid = nextSlotId++, slot = { id: sid, buf: null, ready: false };
     slots.push(slot); const myGen = playGen;
     const bin = atob(b64), ab = new ArrayBuffer(bin.length), v = new Uint8Array(ab);
     for (let i = 0; i < bin.length; i++) v[i] = bin.charCodeAt(i);
+    console.log(`[audio] decoding ${ab.byteLength} bytes, AudioContext state: ${getPlayCtx().state}`);
     getPlayCtx().decodeAudioData(ab)
-        .then(buf  => { if (playGen !== myGen) return; slot.buf = buf; slot.ready = true; drainQ(myGen); })
-        .catch(err => { console.warn('[audio] decode error:', err); slot.ready = true; drainQ(myGen); });
+        .then(buf  => { 
+            console.log(`[audio] decode success, duration=${buf.duration}s`);
+            if (playGen !== myGen) { console.warn('[audio] playGen mismatch, skipping'); return; }
+            slot.buf = buf; slot.ready = true; drainQ(myGen); 
+        })
+        .catch(err => { console.error('[audio] decode error:', err); slot.ready = true; drainQ(myGen); });
     drainQ(myGen);
 }
-function drainQ(g) { if (qRunning || playGen !== g || !slots.length || !slots[0].ready) return; qRunning = true; playNext(g); }
+function drainQ(g) { 
+    if (qRunning) { console.log('[audio] drainQ: already running'); return; }
+    if (playGen !== g) { console.log('[audio] drainQ: gen mismatch'); return; }
+    if (!slots.length) { console.log('[audio] drainQ: no slots'); return; }
+    if (!slots[0].ready) { console.log('[audio] drainQ: slot not ready'); return; }
+    console.log('[audio] drainQ: starting playback');
+    qRunning = true; playNext(g); 
+}
 function playNext(g) {
     if (playGen !== g) { qRunning = false; return; }
     while (slots.length && slots[0].ready && !slots[0].buf) slots.shift();
@@ -646,7 +661,12 @@ function playNext(g) {
     const s = slots[0]; if (!s.ready) { qRunning = false; return; } slots.shift();
     const ctx = getPlayCtx(); curSrc = ctx.createBufferSource(); curSrc.buffer = s.buf;
     curSrc.connect(ctx.destination);
-    curSrc.onended = () => { if (playGen !== g) { qRunning = false; return; } curSrc = null; playNext(g); };
+    curSrc.onended = () => { 
+        console.log('[audio] playback ended');
+        if (playGen !== g) { qRunning = false; return; } 
+        curSrc = null; playNext(g); 
+    };
+    console.log(`[audio] starting playback, duration=${s.buf.duration}s`);
     curSrc.start(0);
 }
 function stopAI() {
