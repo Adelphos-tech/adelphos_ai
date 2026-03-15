@@ -574,7 +574,7 @@ function handleWSMsg(msg) {
     switch (msg.type) {
         case 'user_text':           clearInterim(); hideProc(); addMsg(msg.text, 'user'); break;
         case 'ai_text':             removeTyping(); hideProc(); addMsg(msg.text, 'assistant'); chatId = msg.chat_id || chatId; break;
-        case 'ai_audio':            playB64(msg.data); break;
+        case 'ai_audio':            handleAudioMsg(msg); break;
         case 'interim_transcript':  showInterim(msg.text); break;
         case 'barge_in_ack':        break;
         case 'status':              handleStatus(msg.status); break;
@@ -605,20 +605,37 @@ function setConnStatus(s) {
 
 /* ── Audio Playback ── */
 let playCtx = null, curSrc = null, playGen = 0, slots = [], nextSlotId = 0, qRunning = false;
+// chunk accumulator: key = sentence_idx, value = { chunks: [], total, received }
+const audioChunks = {};
 function getPlayCtx() {
     if (!playCtx || playCtx.state === 'closed') playCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (playCtx.state === 'suspended') playCtx.resume();
     return playCtx;
 }
-function playB64(b64) {
-    isListening = false; isAISpeaking = true; updateMicUI(); startBargeMonitor();
+function handleAudioMsg(msg) {
+    // Single-chunk (legacy) or multi-chunk support
+    const total = msg.total_chunks || 1;
+    const idx   = msg.chunk_index !== undefined ? msg.chunk_index : 0;
+    const key   = msg.sentence_idx;
+    if (!audioChunks[key]) audioChunks[key] = { parts: new Array(total), received: 0, total };
+    audioChunks[key].parts[idx] = msg.data;
+    audioChunks[key].received++;
+    if (audioChunks[key].received === total) {
+        // All chunks received — concatenate and play
+        const joined = audioChunks[key].parts.join('');
+        delete audioChunks[key];
+        playB64(joined, msg.is_filler);
+    }
+}
+function playB64(b64, isFiller) {
+    if (!isFiller) { isListening = false; isAISpeaking = true; updateMicUI(); startBargeMonitor(); }
     const sid = nextSlotId++, slot = { id: sid, buf: null, ready: false };
     slots.push(slot); const myGen = playGen;
     const bin = atob(b64), ab = new ArrayBuffer(bin.length), v = new Uint8Array(ab);
     for (let i = 0; i < bin.length; i++) v[i] = bin.charCodeAt(i);
     getPlayCtx().decodeAudioData(ab)
         .then(buf  => { if (playGen !== myGen) return; slot.buf = buf; slot.ready = true; drainQ(myGen); })
-        .catch(()  => { slot.ready = true; drainQ(myGen); });
+        .catch(err => { console.warn('[audio] decode error:', err); slot.ready = true; drainQ(myGen); });
     drainQ(myGen);
 }
 function drainQ(g) { if (qRunning || playGen !== g || !slots.length || !slots[0].ready) return; qRunning = true; playNext(g); }

@@ -457,6 +457,24 @@ async def voice_ws(ws: WebSocket):
     # ── Send ready status immediately so the frontend unblocks ──
     await ws.send_json({"type": "status", "status": "ready", "chat_id": session.chat_id})
 
+    # ── Helper: send audio in ≤48KB base64 chunks to avoid nginx frame limits ──
+    CHUNK_BYTES = 36000  # 36KB raw → ~48KB base64
+
+    async def send_audio(audio: bytes, sentence_idx: int = 0, is_filler: bool = False):
+        """Send audio as one or more chunked ai_audio messages."""
+        total = len(audio)
+        num_chunks = max(1, (total + CHUNK_BYTES - 1) // CHUNK_BYTES)
+        for i in range(num_chunks):
+            chunk = audio[i * CHUNK_BYTES:(i + 1) * CHUNK_BYTES]
+            await ws.send_json({
+                "type": "ai_audio",
+                "data": base64.b64encode(chunk).decode(),
+                "sentence_idx": sentence_idx,
+                "chunk_index": i,
+                "total_chunks": num_chunks,
+                "is_filler": is_filler,
+            })
+
     async def handle_pipeline(user_text: str):
         """
         Pipeline: filler phrase → stream full LLM response → single TTS call → send audio.
@@ -484,12 +502,7 @@ async def voice_ws(ws: WebSocket):
             if filler_audio:
                 await ws.send_json({"type": "status", "status": "speaking"})
                 session.is_ai_speaking = True
-                await ws.send_json({
-                    "type": "ai_audio",
-                    "data": base64.b64encode(filler_audio).decode(),
-                    "sentence_idx": -1,
-                    "is_filler": True,
-                })
+                await send_audio(filler_audio, sentence_idx=-1, is_filler=True)
                 print(f"[WS] Filler sent at {_time.time()-t0:.2f}s")
         session.turn_count += 1
 
@@ -588,12 +601,8 @@ async def voice_ws(ws: WebSocket):
                         if not session.is_ai_speaking:
                             await ws.send_json({"type": "status", "status": "speaking"})
                             session.is_ai_speaking = True
-                        print(f"[WS] ⚡ Audio ready at {_time.time()-t0:.2f}s ({len(clean)} chars)")
-                        await ws.send_json({
-                            "type": "ai_audio",
-                            "data": base64.b64encode(audio).decode(),
-                            "sentence_idx": 0,
-                        })
+                        print(f"[WS] ⚡ Audio ready at {_time.time()-t0:.2f}s ({len(audio)} bytes, {len(clean)} chars)")
+                        await send_audio(audio, sentence_idx=0)
                     except Exception:
                         pass
 
@@ -803,17 +812,13 @@ async def voice_ws(ws: WebSocket):
 
     # ── Send greeting audio to the user on connect ──
     async def _send_greeting():
-        greeting_text = "Hello! I'm Alex from Adelphos Tech. How can I help you today?"
+        greeting_text = "Hi, I'm Alex. How can I help?"
         try:
             greeting_audio = await tts_sentence(greeting_text, voice=session.voice)
             if greeting_audio:
                 await ws.send_json({"type": "status", "status": "speaking"})
                 session.is_ai_speaking = True
-                await ws.send_json({
-                    "type": "ai_audio",
-                    "data": base64.b64encode(greeting_audio).decode(),
-                    "sentence_idx": 0,
-                })
+                await send_audio(greeting_audio, sentence_idx=0)
                 await ws.send_json({"type": "ai_text", "text": greeting_text, "chat_id": session.chat_id})
                 chat_store[session.chat_id]["messages"].append({"role": "assistant", "content": greeting_text})
                 session.is_ai_speaking = False
