@@ -881,11 +881,25 @@ async def voice_ws(ws: WebSocket):
 
                 elif msg_type == "set_voice":
                     voice = msg.get("voice", "").strip()
-                    ALLOWED_VOICES = {"otherwavs/habib.wav", "otherwavs/shivang.wav"}
+                    ALLOWED_VOICES = {"test.wav", "rizwan.wav", "janu.wav", "happywav.wav"}
                     if voice in ALLOWED_VOICES:
                         session.voice = voice
                         print(f"[WS] Voice changed to: {voice}")
                     await ws.send_json({"type": "voice_ack", "voice": session.voice})
+
+                elif msg_type == "announce_voice":
+                    # Speak voice change announcement
+                    announcement = msg.get("text", "").strip()
+                    if announcement:
+                        try:
+                            audio = await tts_sentence(announcement, voice=session.voice)
+                            if audio:
+                                await ws.send_json({"type": "status", "status": "speaking"})
+                                await send_audio(audio, sentence_idx=-2)
+                                await ws.send_json({"type": "ai_text", "text": announcement, "chat_id": session.chat_id})
+                                await ws.send_json({"type": "status", "status": "ready"})
+                        except Exception as e:
+                            print(f"[WS] Voice announcement failed: {e}")
 
                 elif msg_type == "barge_in":
                     print("[WS] Barge-in received")

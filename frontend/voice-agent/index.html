@@ -426,8 +426,10 @@
             <div class="voice-select-wrap">
                 <i class="fas fa-user-circle"></i>
                 <select id="voice-select" onchange="onVoiceChange(this.value)" title="Select AI voice">
-                    <option value="otherwavs/habib.wav">Habib</option>
-                    <option value="otherwavs/shivang.wav">Shivang</option>
+                    <option value="test.wav" selected>Test</option>
+                    <option value="rizwan.wav">Rizwan</option>
+                    <option value="janu.wav">Janu</option>
+                    <option value="happywav.wav">Happy</option>
                 </select>
             </div>
             <div class="status-pill" id="status-pill">
@@ -755,10 +757,15 @@ async function startCall() {
     if (callActive) return;
     callActive = true;
     try {
-        // Resume playback AudioContext on user gesture (required by browsers)
-        if (playCtx && playCtx.state === 'suspended') {
-            console.log('[audio] resuming playback AudioContext');
+        // Create and resume playback AudioContext on user gesture (required by browsers)
+        if (!playCtx || playCtx.state === 'closed') {
+            playCtx = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('[audio] created new playback AudioContext');
+        }
+        if (playCtx.state === 'suspended') {
+            console.log('[audio] resuming playback AudioContext, state:', playCtx.state);
             await playCtx.resume();
+            console.log('[audio] resumed, new state:', playCtx.state);
         }
         micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -971,6 +978,10 @@ function hideProc()     { processingOvl.classList.add('hidden'); }
 function onVoiceChange(voice) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set_voice', voice: voice }));
+        // Announce voice change
+        const voiceName = voice.replace('.wav', '').replace('happywav', 'happy');
+        const announcement = `Hey, it's ${voiceName.charAt(0).toUpperCase() + voiceName.slice(1)}`;
+        ws.send(JSON.stringify({ type: 'announce_voice', text: announcement }));
     }
 }
 
@@ -978,10 +989,15 @@ function onVoiceChange(voice) {
 connectWS();
 
 // Auto-resume AudioContext on any user interaction (required by browsers)
-document.addEventListener('click', () => {
+document.addEventListener('click', async () => {
+    if (!playCtx || playCtx.state === 'closed') {
+        playCtx = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('[audio] created playback AudioContext on click');
+    }
     if (playCtx && playCtx.state === 'suspended') {
-        console.log('[audio] auto-resuming AudioContext on click');
-        playCtx.resume();
+        console.log('[audio] auto-resuming AudioContext on click, state:', playCtx.state);
+        await playCtx.resume();
+        console.log('[audio] resumed on click, new state:', playCtx.state);
     }
 }, { once: false });
 </script>
