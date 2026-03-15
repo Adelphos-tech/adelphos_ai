@@ -899,7 +899,7 @@ async def voice_ws(ws: WebSocket):
 
                 elif msg_type == "set_voice":
                     voice = msg.get("voice", "").strip()
-                    ALLOWED_VOICES = {"test.wav", "rizwan.wav", "janu.wav", "happywav.wav"}
+                    ALLOWED_VOICES = {"test.wav", "test2.wav"}
                     if voice in ALLOWED_VOICES:
                         session.voice = voice
                         print(f"[WS] Voice changed to: {voice}")
