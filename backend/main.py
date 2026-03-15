@@ -722,6 +722,18 @@ async def voice_ws(ws: WebSocket):
                     if not is_final:
                         display = " ".join(accumulated_transcript + [transcript])
                         await ws.send_json({"type": "interim_transcript", "text": display})
+                        
+                        # Immediate barge-in on interim transcripts during AI speech
+                        cooldown_elapsed = time.time() - pipeline_start_time
+                        if session.is_ai_speaking and cooldown_elapsed > 1.5 and len(transcript) > 2:
+                            print(f"[DG] Barge-in on interim: '{transcript}'")
+                            session.barged_in = True
+                            session.is_ai_speaking = False
+                            if current_task and not current_task.done():
+                                current_task.cancel()
+                            forwarding_audio = True
+                            await ws.send_json({"type": "barge_in_ack"})
+                            await ws.send_json({"type": "status", "status": "ready"})
                         continue
 
                     # is_final=True — discard if within barge-in echo window
