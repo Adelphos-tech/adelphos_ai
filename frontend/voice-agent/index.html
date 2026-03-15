@@ -573,6 +573,11 @@ function connectWS() {
     ws = new WebSocket(`${wsBase}/ws/voice`);
     ws.onopen  = () => {
         setConnStatus('online');
+        // Create AudioContext immediately on connection (before first audio arrives)
+        if (!playCtx || playCtx.state === 'closed') {
+            playCtx = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('[audio] created AudioContext on WS connect, state:', playCtx.state);
+        }
         if (chatId) ws.send(JSON.stringify({ type: 'set_chat_id', chat_id: chatId }));
         const selVoice = document.getElementById('voice-select');
         if (selVoice && selVoice.value) ws.send(JSON.stringify({ type: 'set_voice', voice: selVoice.value }));
@@ -998,15 +1003,17 @@ function onVoiceChange(voice) {
 /* ── Boot ── */
 connectWS();
 
-// Auto-resume AudioContext on any user interaction (required by browsers)
+// Auto-resume AudioContext on first user interaction (required by browsers)
+let audioContextResumed = false;
 document.addEventListener('click', async () => {
     if (!playCtx || playCtx.state === 'closed') {
         playCtx = new (window.AudioContext || window.webkitAudioContext)();
         console.log('[audio] created playback AudioContext on click');
     }
-    if (playCtx && playCtx.state === 'suspended') {
-        console.log('[audio] auto-resuming AudioContext on click, state:', playCtx.state);
+    if (playCtx && playCtx.state === 'suspended' && !audioContextResumed) {
+        console.log('[audio] auto-resuming AudioContext on first click, state:', playCtx.state);
         await playCtx.resume();
+        audioContextResumed = true;
         console.log('[audio] resumed on click, new state:', playCtx.state);
     }
 }, { once: false });
