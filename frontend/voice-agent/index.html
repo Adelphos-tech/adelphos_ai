@@ -388,6 +388,87 @@
             padding: 0 2px;
         }
 
+        /* ── PROPERTY MODAL ── */
+        .prop-modal-overlay {
+            display: none; position: fixed; inset: 0; z-index: 1000;
+            background: rgba(0,0,0,0.75); backdrop-filter: blur(6px);
+            align-items: center; justify-content: center;
+        }
+        .prop-modal-overlay.open { display: flex; }
+        .prop-modal {
+            background: #0f172a; border: 1px solid var(--border-light);
+            border-radius: 1rem; width: min(680px, 95vw); max-height: 90vh;
+            overflow-y: auto; position: relative;
+            box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+            animation: msgIn 0.25s cubic-bezier(.34,1.56,.64,1);
+        }
+        .prop-modal-close {
+            position: absolute; top: 0.9rem; right: 0.9rem;
+            background: var(--surface-2); border: 1px solid var(--border);
+            color: var(--text-sub); width: 2rem; height: 2rem; border-radius: 50%;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            font-size: 0.85rem; transition: all 0.15s; z-index: 10;
+        }
+        .prop-modal-close:hover { background: var(--surface); color: var(--text); }
+        .prop-modal-gallery {
+            width: 100%; height: 220px; overflow: hidden; border-radius: 1rem 1rem 0 0;
+            position: relative; background: var(--surface-2);
+        }
+        .prop-modal-gallery img {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        .prop-modal-gallery .no-img {
+            width: 100%; height: 100%; display: flex; align-items: center;
+            justify-content: center; color: var(--text-muted); font-size: 3rem;
+        }
+        .prop-modal-imgs {
+            display: flex; gap: 0.4rem; padding: 0.5rem 1rem;
+            overflow-x: auto; background: var(--surface);
+        }
+        .prop-modal-imgs img {
+            width: 70px; height: 50px; object-fit: cover; border-radius: 0.4rem;
+            cursor: pointer; border: 2px solid transparent; flex-shrink: 0;
+            transition: border-color 0.15s;
+        }
+        .prop-modal-imgs img.active { border-color: var(--primary); }
+        .prop-modal-body { padding: 1.2rem 1.4rem; }
+        .prop-modal-title {
+            font-size: 1.05rem; font-weight: 700; color: var(--text); margin-bottom: 0.5rem;
+        }
+        .prop-modal-price {
+            font-size: 1.3rem; font-weight: 800; color: var(--primary-light); margin-bottom: 0.75rem;
+        }
+        .prop-modal-tags {
+            display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem;
+        }
+        .prop-modal-stats {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.5rem; margin-bottom: 0.75rem;
+        }
+        .prop-modal-stat {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 0.5rem; padding: 0.5rem 0.75rem;
+        }
+        .prop-modal-stat .label { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .prop-modal-stat .value { font-size: 0.82rem; font-weight: 600; color: var(--text); margin-top: 0.15rem; }
+        .prop-modal-desc {
+            font-size: 0.78rem; color: var(--text-sub); line-height: 1.6;
+            border-top: 1px solid var(--border); padding-top: 0.75rem; margin-top: 0.25rem;
+        }
+        .prop-modal-footer {
+            padding: 0.75rem 1.4rem 1.2rem; display: flex; gap: 0.75rem;
+        }
+        .prop-modal-btn {
+            flex: 1; padding: 0.65rem; border-radius: 0.6rem; border: none;
+            font-size: 0.8rem; font-weight: 600; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+            transition: all 0.15s;
+        }
+        .prop-modal-btn.primary { background: var(--primary); color: #fff; }
+        .prop-modal-btn.primary:hover { background: var(--primary-dark); }
+        .prop-modal-btn.secondary { background: var(--surface-2); color: var(--text-sub); border: 1px solid var(--border-light); }
+        .prop-modal-btn.secondary:hover { color: var(--text); border-color: var(--primary); }
+
         @media (max-width: 600px) {
             .header { padding: 0 1rem; }
             .header-tagline, .header-divider { display: none; }
@@ -400,6 +481,23 @@
 </head>
 <body>
 <canvas id="bg-canvas"></canvas>
+
+<!-- ── PROPERTY DETAIL MODAL ── -->
+<div class="prop-modal-overlay" id="propModalOverlay" onclick="if(event.target===this)closePropModal()">
+    <div class="prop-modal" id="propModal">
+        <button class="prop-modal-close" onclick="closePropModal()"><i class="fas fa-times"></i></button>
+        <div class="prop-modal-gallery" id="propModalGallery"></div>
+        <div class="prop-modal-imgs" id="propModalImgs"></div>
+        <div class="prop-modal-body">
+            <div class="prop-modal-title" id="propModalTitle"></div>
+            <div class="prop-modal-price" id="propModalPrice"></div>
+            <div class="prop-modal-tags" id="propModalTags"></div>
+            <div class="prop-modal-stats" id="propModalStats"></div>
+            <div class="prop-modal-desc" id="propModalDesc"></div>
+        </div>
+        <div class="prop-modal-footer" id="propModalFooter"></div>
+    </div>
+</div>
 
 <div class="app">
 
@@ -925,14 +1023,13 @@ function renderPropertyCards(properties) {
         const district = p.district ? `<span><i class="fas fa-map-marker-alt"></i> ${escHtml(p.district)}</span>` : '';
         const ptype = p.property_type && p.property_type !== p.title ? `<span class="prop-badge badge-type">${escHtml(p.property_type)}</span>` : '';
 
-        const card = document.createElement('a');
+        const card = document.createElement('div');
         card.className = 'prop-card';
         card.setAttribute('data-property-id', idx);
         card.setAttribute('data-property-title', (p.title || '').toLowerCase());
-        card.setAttribute('data-property-location', (p.district || p.location || '').toLowerCase());
-        card.href = p.url || '#';
-        card.target = p.url ? '_blank' : '_self';
-        card.rel = 'noopener noreferrer';
+        card.setAttribute('data-property-location', (p.district || p.address || '').toLowerCase());
+        card.style.cursor = 'pointer';
+        card.onclick = () => openPropModal(p);
 
         card.innerHTML = `
             <div class="prop-img">
@@ -950,7 +1047,7 @@ function renderPropertyCards(properties) {
                 <div class="prop-details">
                     ${beds}${baths}${areaHtml}${district}
                 </div>
-                ${p.url ? '<div class="prop-link"><i class="fas fa-external-link-alt"></i> View listing</div>' : ''}
+                <div class="prop-link"><i class="fas fa-expand-alt"></i> View details</div>
             </div>`;
 
         cards.appendChild(card);
@@ -970,6 +1067,92 @@ function addTyping() {
     chatEl.appendChild(typingEl); chatEl.scrollTop = chatEl.scrollHeight;
 }
 function removeTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
+
+/* ── Property Modal ── */
+function openPropModal(p) {
+    const overlay = document.getElementById('propModalOverlay');
+    const imgs = p.all_image_urls || (p.image_url ? [p.image_url] : []);
+    
+    // Gallery - main image
+    const gallery = document.getElementById('propModalGallery');
+    if (imgs.length) {
+        gallery.innerHTML = `<img id="propModalMainImg" src="${escHtml(imgs[0])}" alt="${escHtml(p.title||'')}"
+            onerror="this.src=''; this.parentElement.innerHTML='<div class=no-img><i class=fas fa-building></i></div>'">`;
+    } else {
+        gallery.innerHTML = '<div class="no-img"><i class="fas fa-building"></i></div>';
+    }
+
+    // Thumbnail strip
+    const strip = document.getElementById('propModalImgs');
+    strip.innerHTML = '';
+    if (imgs.length > 1) {
+        imgs.forEach((url, i) => {
+            const t = document.createElement('img');
+            t.src = url; t.alt = ''; if (i===0) t.className='active';
+            t.onerror = () => t.remove();
+            t.onclick = () => {
+                document.getElementById('propModalMainImg').src = url;
+                strip.querySelectorAll('img').forEach(x=>x.classList.remove('active'));
+                t.classList.add('active');
+            };
+            strip.appendChild(t);
+        });
+        strip.style.display = 'flex';
+    } else { strip.style.display = 'none'; }
+
+    // Title & Price
+    document.getElementById('propModalTitle').textContent = p.title || 'Property Listing';
+    document.getElementById('propModalPrice').textContent = p.price_raw || p.display_price || 'Price on request';
+
+    // Tags
+    const isRent = (p.category||'').toLowerCase().includes('rent');
+    let tags = `<span class="prop-badge ${isRent?'badge-rent':'badge-sale'}">${isRent?'For Rent':'For Sale'}</span>`;
+    if (p.property_type) tags += `<span class="prop-badge badge-type">${escHtml(p.property_type)}</span>`;
+    if (p.tenure) tags += `<span class="prop-badge badge-type">${escHtml(p.tenure)}</span>`;
+    document.getElementById('propModalTags').innerHTML = tags;
+
+    // Stats grid
+    const stats = [];
+    if (p.bedrooms!=='' && p.bedrooms!==undefined) stats.push(['Bedrooms', p.bedrooms]);
+    if (p.bathrooms) stats.push(['Bathrooms', p.bathrooms]);
+    if (p.floor_area_raw || p.floor_area) stats.push(['Floor Area', p.floor_area_raw || p.floor_area+' sqft']);
+    if (p.psf) stats.push(['PSF', p.psf]);
+    if (p.district) stats.push(['District', p.district]);
+    if (p.address) stats.push(['Address', p.address]);
+    if (p.tenure) stats.push(['Tenure', p.tenure]);
+    if (p.listed_date) stats.push(['Listed', p.listed_date]);
+    document.getElementById('propModalStats').innerHTML = stats.map(([l,v])=>
+        `<div class="prop-modal-stat"><div class="label">${escHtml(l)}</div><div class="value">${escHtml(String(v))}</div></div>`
+    ).join('');
+
+    // Description
+    const desc = document.getElementById('propModalDesc');
+    if (p.description) { desc.textContent = p.description; desc.style.display='block'; }
+    else { desc.style.display='none'; }
+
+    // Footer buttons
+    const footer = document.getElementById('propModalFooter');
+    footer.innerHTML = '';
+    if (p.url) {
+        const btn = document.createElement('a');
+        btn.className = 'prop-modal-btn primary';
+        btn.href = p.url; btn.target = '_blank'; btn.rel = 'noopener noreferrer';
+        btn.innerHTML = '<i class="fas fa-external-link-alt"></i> View on listing site';
+        footer.appendChild(btn);
+    }
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'prop-modal-btn secondary';
+    closeBtn.innerHTML = '<i class="fas fa-times"></i> Close';
+    closeBtn.onclick = closePropModal;
+    footer.appendChild(closeBtn);
+
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+function closePropModal() {
+    document.getElementById('propModalOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
 
 /* ── Property Highlighting ── */
 function highlightPropertyMentions(text) {
