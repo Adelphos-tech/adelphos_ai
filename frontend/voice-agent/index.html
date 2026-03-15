@@ -524,10 +524,8 @@
             <div class="voice-select-wrap">
                 <i class="fas fa-user-circle"></i>
                 <select id="voice-select" onchange="onVoiceChange(this.value)" title="Select AI voice">
-                    <option value="test.wav" selected>Test</option>
-                    <option value="rizwan.wav">Rizwan</option>
-                    <option value="janu.wav">Janu</option>
-                    <option value="happywav.wav">Happy</option>
+                    <option value="test.wav" selected>Habib</option>
+                    <option value="happywav.wav">Shivang</option>
                 </select>
             </div>
             <div class="status-pill" id="status-pill">
@@ -1194,8 +1192,9 @@ function onVoiceChange(voice) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set_voice', voice: voice }));
         // Announce voice change
-        const voiceName = voice.replace('.wav', '').replace('happywav', 'happy');
-        const announcement = `Hey, it's ${voiceName.charAt(0).toUpperCase() + voiceName.slice(1)}`;
+        const voiceNames = { 'test.wav': 'Habib', 'happywav.wav': 'Shivang' };
+        const voiceName = voiceNames[voice] || voice.replace('.wav', '');
+        const announcement = `Hey, it's ${voiceName}`;
         ws.send(JSON.stringify({ type: 'announce_voice', text: announcement }));
     }
 }
