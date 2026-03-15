@@ -561,9 +561,13 @@ function connectWS() {
         const selVoice = document.getElementById('voice-select');
         if (selVoice && selVoice.value) ws.send(JSON.stringify({ type: 'set_voice', voice: selVoice.value }));
     };
-    ws.onmessage = e => handleWSMsg(JSON.parse(e.data));
-    ws.onclose = () => { setConnStatus('offline'); setTimeout(connectWS, 2000); };
-    ws.onerror = err => console.error('[WS]', err);
+    ws.onmessage = e => {
+        try {
+            if (typeof e.data === 'string') handleWSMsg(JSON.parse(e.data));
+        } catch(err) { console.error('[WS] message error:', err, e.data && e.data.slice(0,100)); }
+    };
+    ws.onclose = (ev) => { console.warn('[WS] closed', ev.code, ev.reason); setConnStatus('offline'); setTimeout(connectWS, 3000); };
+    ws.onerror = err => console.error('[WS] error:', err);
 }
 
 function handleWSMsg(msg) {
