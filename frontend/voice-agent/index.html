@@ -591,10 +591,20 @@ function handleWSMsg(msg) {
         case 'user_text':           clearInterim(); hideProc(); addMsg(msg.text, 'user'); break;
         case 'ai_text':             removeTyping(); hideProc(); addMsg(msg.text, 'assistant'); highlightPropertyMentions(msg.text); chatId = msg.chat_id || chatId; break;
         case 'ai_audio':            handleAudioMsg(msg); break;
-        case 'interim_transcript':  showInterim(msg.text); break;
+        case 'interim_transcript':  
+            showInterim(msg.text);
+            // Immediate barge-in: stop AI audio when user starts speaking (AI-tutor-D pattern)
+            if (msg.text && msg.text.trim().length > 2 && isAISpeaking) {
+                console.log('[barge] User speaking, stopping AI audio');
+                stopAI();
+            }
+            break;
         case 'barge_in_ack':        stopAI(); clearInterim(); break;
         case 'status':              handleStatus(msg.status); break;
-        case 'properties':          renderPropertyCards(msg.data); break;
+        case 'properties':          
+            console.log('[properties] Received:', msg.data?.length || 0, 'properties');
+            renderPropertyCards(msg.data); 
+            break;
         case 'error':               hideProc(); removeTyping(); isProcessing = false; addMsg('Error: ' + msg.message, 'assistant'); break;
     }
 }
