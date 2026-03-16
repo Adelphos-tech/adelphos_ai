@@ -495,6 +495,7 @@ class VoiceSession:
         self.turn_count = 0          # track conversation turns for filler logic
         self.voice = os.getenv("TTS_VOICE", "test2.wav")  # selected TTS voice (default: Shivang)
         self.stt_language = "en"  # STT language: en, zh, ms, ta
+        self.greeting_sent = False  # ensure greeting fires only once, after voice is set
 
     def cancel(self):
         self._cancelled = True
@@ -922,8 +923,11 @@ async def voice_ws(ws: WebSocket):
     dg_reader_task = asyncio.create_task(deepgram_reader())
     asyncio.create_task(deepgram_keepalive())
 
-    # ── Send greeting audio to the user on connect ──
     async def _send_greeting():
+        """Send greeting after voice is confirmed — called from set_voice handler."""
+        if session.greeting_sent:
+            return
+        session.greeting_sent = True
         voice_name = "Shivang" if session.voice == "test2.wav" else "Habib"
         greeting_text = f"Hey there, I'm {voice_name}, your Singapore property consultant. What kind of property are you looking for today?"
         try:
@@ -939,7 +943,6 @@ async def voice_ws(ws: WebSocket):
         except Exception as e:
             print(f"[WS] Greeting failed: {e}")
             await ws.send_json({"type": "status", "status": "ready"})
-    asyncio.create_task(_send_greeting())
 
     _frame_count = 0
     try:
@@ -1011,6 +1014,9 @@ async def voice_ws(ws: WebSocket):
                         try: update_session_voice(session.chat_id, voice)
                         except Exception: pass
                     await ws.send_json({"type": "voice_ack", "voice": session.voice})
+                    # Fire greeting on first set_voice (guaranteed to use correct voice)
+                    if not session.greeting_sent:
+                        asyncio.create_task(_send_greeting())
 
                 elif msg_type == "announce_voice":
                     # Speak voice change announcement
