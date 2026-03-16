@@ -429,14 +429,22 @@ DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 _KW_PARAMS = "&".join(
     f"keywords={kw.replace(' ', '%20')}" for kw in TECH_KEYWORDS
 )
-DEEPGRAM_WS_URL = (
+DEEPGRAM_BASE_URL = (
     "wss://api.deepgram.com/v1/listen?"
-    "model=nova-2&detect_language=true&encoding=linear16&sample_rate=16000&channels=1"
+    "model=nova-2&encoding=linear16&sample_rate=16000&channels=1"
     "&punctuate=true&smart_format=true&filler_words=false"
     "&interim_results=true&endpointing=300"
     "&vad_events=true&utterance_end_ms=1000"
     f"&{_KW_PARAMS}"
 )
+# Supported STT language codes (Deepgram nova-2)
+DEEPGRAM_LANG_CODES = {
+    "en": "en", "zh": "zh-CN", "ms": "ms", "ta": "ta",
+}
+
+def build_deepgram_url(lang: str = "en") -> str:
+    code = DEEPGRAM_LANG_CODES.get(lang, "en")
+    return DEEPGRAM_BASE_URL + f"&language={code}"
 
 
 def frame_db(i16: np.ndarray) -> float:
@@ -486,6 +494,7 @@ class VoiceSession:
         self._cancelled = False
         self.turn_count = 0          # track conversation turns for filler logic
         self.voice = os.getenv("TTS_VOICE", "test2.wav")  # selected TTS voice (default: Shivang)
+        self.stt_language = "en"  # STT language: en, zh, ms, ta
 
     def cancel(self):
         self._cancelled = True
@@ -731,7 +740,7 @@ async def voice_ws(ws: WebSocket):
         for attempt in range(3):
             try:
                 headers = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-                dg_ws = await ws_lib.connect(DEEPGRAM_WS_URL, additional_headers=headers)
+                dg_ws = await ws_lib.connect(build_deepgram_url(session.stt_language), additional_headers=headers)
                 print(f"[DG] Deepgram live connection opened (attempt {attempt+1})")
                 return
             except Exception as e:
@@ -982,6 +991,16 @@ async def voice_ws(ws: WebSocket):
                     if cid and cid in chat_store:
                         session.chat_id = cid
                     await ws.send_json({"type": "status", "status": "ready", "chat_id": session.chat_id})
+
+                elif msg_type == "set_language":
+                    lang = msg.get("language", "en").strip()
+                    if lang in DEEPGRAM_LANG_CODES:
+                        session.stt_language = lang
+                        print(f"[WS] STT language changed to: {lang}")
+                        # Reconnect Deepgram with new language
+                        await close_deepgram()
+                        await open_deepgram()
+                    await ws.send_json({"type": "language_ack", "language": session.stt_language})
 
                 elif msg_type == "set_voice":
                     voice = msg.get("voice", "").strip()

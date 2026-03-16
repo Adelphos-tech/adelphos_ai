@@ -589,6 +589,15 @@
                     <option value="test2.wav" selected>Shivang</option>
                 </select>
             </div>
+            <div class="voice-select-wrap">
+                <i class="fas fa-globe"></i>
+                <select id="lang-select" onchange="onLangChange(this.value)" title="Speech language">
+                    <option value="en" selected>English</option>
+                    <option value="zh">中文</option>
+                    <option value="ms">Melayu</option>
+                    <option value="ta">தமிழ்</option>
+                </select>
+            </div>
             <div class="status-pill" id="status-pill">
                 <div class="status-dot" id="status-dot"></div>
                 <span id="status-label">Online</span>
@@ -1262,11 +1271,17 @@ function hideProc()     { processingOvl.classList.add('hidden'); }
 function onVoiceChange(voice) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set_voice', voice: voice }));
-        // Announce voice change
         const voiceNames = { 'test.wav': 'Habib', 'test2.wav': 'Shivang' };
         const voiceName = voiceNames[voice] || voice.replace('.wav', '');
         const announcement = `Hey, it's ${voiceName}`;
         ws.send(JSON.stringify({ type: 'announce_voice', text: announcement }));
+    }
+}
+
+/* ── Language Selection ── */
+function onLangChange(lang) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set_language', language: lang }));
     }
 }
 
