@@ -459,10 +459,10 @@ def looks_like_noise(text: str) -> bool:
     if len(t) <= 2:
         return True
     # Exact-match noise phrases (common STT hallucinations)
+    # NOTE: keep greetings like hey/hello/hi so users can start conversation naturally
     noise_exact = {
         "you", "bye", "the", "a", "hmm", "uh", "um", "oh", "ah",
-        "yeah", "okay", "ok", "so", "thank you", "thanks",
-        "subscribe", "like and subscribe", "thanks for watching",
+        "so", "subscribe", "like and subscribe", "thanks for watching",
         "thank you for watching",
     }
     # Strip trailing punctuation for comparison
@@ -485,7 +485,7 @@ class VoiceSession:
         self.barged_in = False
         self._cancelled = False
         self.turn_count = 0          # track conversation turns for filler logic
-        self.voice = os.getenv("TTS_VOICE", "rizwan.wav")  # selected TTS voice
+        self.voice = os.getenv("TTS_VOICE", "test2.wav")  # selected TTS voice (default: Shivang)
 
     def cancel(self):
         self._cancelled = True
@@ -566,17 +566,10 @@ async def voice_ws(ws: WebSocket):
 
         await ws.send_json({"type": "status", "status": "thinking"})
 
-        # ── Send a filler phrase to cover LLM+TTS latency (skip first turn — greeting) ──
+        # ── Send a pre-cached filler phrase to cover LLM+TTS latency (skip first turn — greeting) ──
         if not session.barged_in and session.turn_count > 0:
-            filler_audio = None
-            try:
-                filler_text = random.choice(FILLER_PHRASES_GENERAL)
-                filler_audio = await tts_sentence(filler_text, voice=session.voice)
-            except Exception:
-                pass
-            if not filler_audio and filler_cache:
-                _pool = filler_cache_general if filler_cache_general else filler_cache
-                filler_audio = random.choice(_pool)
+            _pool = filler_cache_general if filler_cache_general else filler_cache
+            filler_audio = random.choice(_pool) if _pool else None
             if filler_audio:
                 await ws.send_json({"type": "status", "status": "speaking"})
                 session.is_ai_speaking = True
@@ -779,7 +772,10 @@ async def voice_ws(ws: WebSocket):
         if not cleaned or looks_like_noise(full_text):
             print(f"[DG] Noise/empty: '{full_text}' — skipping")
             return
-        if word_count < 2 and len(cleaned) < 6:
+        # Allow short greetings (hey, hello, hi, etc.) — only skip true noise
+        greetings = {"hey", "hello", "hi", "yo", "hiya", "howdy"}
+        full_text_clean = re.sub(r'[^\w\s]', '', full_text.lower()).strip()
+        if word_count < 2 and len(cleaned) < 6 and full_text_clean not in greetings:
             print(f"[DG] Too short ({word_count} words): '{full_text}' — skipping")
             return
         print(f"[DG] Triggering pipeline (silence): '{full_text}'")
@@ -918,7 +914,8 @@ async def voice_ws(ws: WebSocket):
 
     # ── Send greeting audio to the user on connect ──
     async def _send_greeting():
-        greeting_text = "Hey there, I'm Habib, your Singapore property consultant. What kind of property are you looking for today?"
+        voice_name = "Shivang" if session.voice == "test2.wav" else "Habib"
+        greeting_text = f"Hey there, I'm {voice_name}, your Singapore property consultant. What kind of property are you looking for today?"
         try:
             greeting_audio = await tts_sentence(greeting_text, voice=session.voice)
             if greeting_audio:
