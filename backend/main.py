@@ -625,8 +625,9 @@ async def voice_ws(ws: WebSocket):
         asyncio.get_event_loop().run_in_executor(None, _stream_llm)
 
         _FILLER_RE = re.compile(
-            r'^(certainly|of course|sure thing|absolutely|great|sure|got it|understood)'
-            r'[!,.]?\s*',
+            r'^(certainly|of course|sure thing|absolutely|great question|good question|'
+            r'that\'s a great question|happy to help|no problem|sure|got it|understood|'
+            r'great|of course|glad you asked)[!,.]?\s*',
             re.IGNORECASE
         )
 
