@@ -431,7 +431,7 @@ _KW_PARAMS = "&".join(
 )
 DEEPGRAM_WS_URL = (
     "wss://api.deepgram.com/v1/listen?"
-    "model=nova-2&language=en&encoding=linear16&sample_rate=16000&channels=1"
+    "model=nova-2&detect_language=true&encoding=linear16&sample_rate=16000&channels=1"
     "&punctuate=true&smart_format=true&filler_words=false"
     "&interim_results=true&endpointing=300"
     "&vad_events=true&utterance_end_ms=1000"
