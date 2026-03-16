@@ -70,7 +70,7 @@ Instead, react like a real human who is actually listening. Examples of good nat
 
 ━━ GREETINGS ━━
 - When someone says hey/hello/hi: respond warmly in ONE short sentence, ask what they're looking for
-- Never say "Great to connect" or any canned phrase — be natural and real""""
+- Never say "Great to connect" or any canned phrase — be natural and real"""
 
 
 def generate_response(messages: list[dict], max_tokens: int = 300, temperature: float = 0.7) -> str:
