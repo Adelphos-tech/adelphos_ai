@@ -305,6 +305,88 @@ async def search_properties(query: str, limit: int = 5) -> list[dict]:
     return properties
 
 
+async def ingest_properties_from_file(file_path: str) -> dict:
+    """
+    Ingest properties from an Excel or CSV file into Qdrant.
+    Expected columns: title, address, district, price, bedrooms, bathrooms,
+    floor_area, property_type, category, tenure, description, url, image_url, agent_name, agent_agency
+    """
+    import pandas as pd
+    import uuid as _uuid
+    from qdrant_client.models import PointStruct
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == '.csv':
+        df = pd.read_csv(file_path)
+    else:
+        df = pd.read_excel(file_path)
+
+    # Normalize column names
+    df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
+
+    required = ['title']
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        return {"error": f"Missing required columns: {missing}", "total_rows": len(df), "inserted": 0}
+
+    model = await _get_model()
+    client = _get_client()
+
+    points = []
+    errors = 0
+    for idx, row in df.iterrows():
+        try:
+            title = str(row.get('title', '')).strip()
+            if not title:
+                errors += 1
+                continue
+
+            # Build text for embedding
+            parts = [title]
+            for col in ['address', 'district', 'property_type', 'category', 'description']:
+                val = str(row.get(col, '')).strip()
+                if val and val.lower() != 'nan':
+                    parts.append(val)
+            embed_text = ' '.join(parts)
+
+            vector = model.encode(embed_text).tolist()
+
+            payload = {}
+            for col in df.columns:
+                val = row.get(col)
+                if pd.notna(val):
+                    payload[col] = str(val).strip() if isinstance(val, str) else val
+
+            # Handle image URLs
+            if 'image_url' in payload and isinstance(payload['image_url'], str):
+                payload['all_image_urls'] = [u.strip() for u in payload['image_url'].split(',') if u.strip()]
+
+            point_id = str(_uuid.uuid4())
+            points.append(PointStruct(
+                id=point_id,
+                vector=vector,
+                payload=payload
+            ))
+        except Exception as e:
+            print(f"[QDRANT INGEST] Row {idx} error: {e}")
+            errors += 1
+
+    if points:
+        # Upsert in batches of 100
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i+batch_size]
+            await client.upsert(collection_name=COLLECTION_NAME, points=batch)
+            print(f"[QDRANT INGEST] Inserted batch {i//batch_size + 1} ({len(batch)} points)")
+
+    return {
+        "message": "Property data ingested successfully",
+        "total_rows": len(df),
+        "inserted": len(points),
+        "errors": errors,
+    }
+
+
 def format_properties_for_llm(properties: list[dict]) -> str:
     """Format Singapore property search results as context for the LLM."""
     if not properties:

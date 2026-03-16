@@ -11,3 +11,5 @@ numpy==1.26.4
 qdrant-client==1.9.1
 sentence-transformers==3.0.1
 certifi
+pandas>=2.0.0
+openpyxl>=3.1.0

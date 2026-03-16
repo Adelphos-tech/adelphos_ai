@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel — Voice Agent Analytics</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1; --primary-light: #818cf8; --primary-dark: #4f46e5;
+            --accent: #06b6d4; --emerald: #10b981; --amber: #f59e0b; --red: #ef4444;
+            --bg: #030712; --bg-2: #070d1f;
+            --surface: #0f172a; --surface-2: #1e293b; --surface-3: #334155;
+            --text: #f1f5f9; --text-sub: #94a3b8; --text-muted: #64748b;
+            --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.11);
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; min-height: 100vh; }
+
+        /* ── LOGIN ── */
+        .login-overlay {
+            position: fixed; inset: 0; z-index: 999; background: var(--bg);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .login-overlay.hidden { display: none; }
+        .login-card {
+            background: var(--surface); border: 1px solid var(--border-light);
+            border-radius: 16px; padding: 2.5rem 2rem; width: min(400px, 92vw); text-align: center;
+        }
+        .login-card h2 { font-size: 1.3rem; margin-bottom: 0.5rem; }
+        .login-card p { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem; }
+        .login-card input {
+            width: 100%; padding: 0.7rem 1rem; border-radius: 8px; border: 1px solid var(--border-light);
+            background: var(--surface-2); color: var(--text); font-size: 0.85rem; font-family: inherit;
+            outline: none; margin-bottom: 1rem;
+        }
+        .login-card input:focus { border-color: var(--primary); }
+        .login-card button {
+            width: 100%; padding: 0.7rem; border-radius: 8px; border: none;
+            background: var(--primary); color: white; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; font-family: inherit; transition: background 0.15s;
+        }
+        .login-card button:hover { background: var(--primary-dark); }
+        .login-error { color: var(--red); font-size: 0.75rem; margin-top: 0.5rem; display: none; }
+
+        /* ── LAYOUT ── */
+        .app-wrap { display: none; }
+        .app-wrap.active { display: block; }
+        .topbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.8rem 1.5rem; border-bottom: 1px solid var(--border);
+            background: rgba(3,7,18,0.92); backdrop-filter: blur(20px);
+            position: sticky; top: 0; z-index: 50;
+        }
+        .topbar-left { display: flex; align-items: center; gap: 0.8rem; }
+        .topbar-left img { height: 28px; }
+        .topbar-title { font-size: 0.85rem; font-weight: 700; color: var(--text-sub); }
+        .topbar-right { display: flex; align-items: center; gap: 0.6rem; }
+        .topbar-btn {
+            padding: 0.35rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-light);
+            background: var(--surface-2); color: var(--text-sub); font-size: 0.7rem; font-weight: 600;
+            cursor: pointer; font-family: inherit; text-decoration: none; transition: all 0.15s;
+            display: flex; align-items: center; gap: 0.35rem;
+        }
+        .topbar-btn:hover { border-color: var(--primary); color: var(--primary-light); }
+
+        .main { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+        /* ── TABS ── */
+        .tabs { display: flex; gap: 2px; background: var(--surface-2); border-radius: 8px; padding: 3px; margin-bottom: 1.5rem; overflow-x: auto; }
+        .tab {
+            padding: 0.45rem 1rem; border-radius: 6px; border: none; background: none;
+            color: var(--text-muted); font-size: 0.72rem; font-weight: 600; font-family: inherit;
+            cursor: pointer; transition: all 0.15s; white-space: nowrap;
+            display: flex; align-items: center; gap: 0.35rem;
+        }
+        .tab.active { background: var(--primary); color: white; }
+        .tab:hover:not(.active) { color: var(--text-sub); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* ── STAT CARDS ── */
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem; margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: var(--surface); border: 1px solid var(--border-light);
+            border-radius: 12px; padding: 1rem 1.2rem;
+        }
+        .stat-card .label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-bottom: 0.3rem; }
+        .stat-card .value { font-size: 1.6rem; font-weight: 800; color: var(--text); }
+        .stat-card .sub { font-size: 0.65rem; color: var(--text-muted); margin-top: 0.2rem; }
+        .stat-card.accent .value { color: var(--primary-light); }
+        .stat-card.green .value { color: var(--emerald); }
+        .stat-card.amber .value { color: var(--amber); }
+        .stat-card.red .value { color: var(--red); }
+
+        /* ── TABLES ── */
+        .panel {
+            background: var(--surface); border: 1px solid var(--border-light);
+            border-radius: 12px; overflow: hidden; margin-bottom: 1.5rem;
+        }
+        .panel-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.8rem 1.2rem; border-bottom: 1px solid var(--border);
+        }
+        .panel-title { font-size: 0.82rem; font-weight: 700; }
+        .panel-action {
+            padding: 0.3rem 0.7rem; border-radius: 6px; border: 1px solid var(--border-light);
+            background: var(--surface-2); color: var(--text-sub); font-size: 0.65rem; font-weight: 600;
+            cursor: pointer; font-family: inherit; transition: all 0.15s;
+        }
+        .panel-action:hover { border-color: var(--primary); color: var(--primary-light); }
+        .tbl { width: 100%; border-collapse: collapse; }
+        .tbl th {
+            text-align: left; padding: 0.55rem 1rem; font-size: 0.62rem; font-weight: 700;
+            color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border);
+        }
+        .tbl td {
+            padding: 0.6rem 1rem; font-size: 0.75rem; color: var(--text-sub);
+            border-bottom: 1px solid var(--border); vertical-align: top;
+            max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .tbl tr:hover td { background: rgba(99,102,241,0.04); color: var(--text); }
+        .tbl tr:last-child td { border-bottom: none; }
+        .badge {
+            display: inline-block; padding: 0.15rem 0.5rem; border-radius: 50px;
+            font-size: 0.6rem; font-weight: 700;
+        }
+        .badge-green { background: rgba(16,185,129,0.12); color: #10b981; }
+        .badge-red { background: rgba(239,68,68,0.12); color: #ef4444; }
+        .badge-blue { background: rgba(99,102,241,0.12); color: #818cf8; }
+        .badge-amber { background: rgba(245,158,11,0.12); color: #f59e0b; }
+        .clickable { cursor: pointer; }
+        .clickable:hover { text-decoration: underline; color: var(--primary-light); }
+        .empty-row { text-align: center; padding: 2rem !important; color: var(--text-muted); font-size: 0.8rem; }
+
+        /* ── UPLOAD ── */
+        .upload-zone {
+            border: 2px dashed var(--border-light); border-radius: 12px;
+            padding: 2.5rem; text-align: center; cursor: pointer;
+            transition: all 0.2s; margin-bottom: 1rem;
+        }
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--primary); background: rgba(99,102,241,0.05);
+        }
+        .upload-zone i { font-size: 2rem; color: var(--text-muted); margin-bottom: 0.8rem; }
+        .upload-zone p { font-size: 0.82rem; color: var(--text-sub); }
+        .upload-zone .hint { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.4rem; }
+        .upload-result {
+            background: var(--surface); border: 1px solid var(--border-light);
+            border-radius: 8px; padding: 1rem; font-size: 0.78rem; margin-top: 1rem;
+            display: none;
+        }
+        .upload-result.success { border-color: rgba(16,185,129,0.3); }
+        .upload-result.error { border-color: rgba(239,68,68,0.3); }
+
+        /* ── SESSION DETAIL MODAL ── */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0; z-index: 1000;
+            background: rgba(0,0,0,0.7); backdrop-filter: blur(6px);
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: var(--surface); border: 1px solid var(--border-light);
+            border-radius: 12px; width: min(700px, 95vw); max-height: 90vh;
+            overflow-y: auto; padding: 1.5rem;
+        }
+        .modal-close {
+            float: right; background: var(--surface-2); border: 1px solid var(--border);
+            color: var(--text-sub); width: 28px; height: 28px; border-radius: 50%;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            font-size: 0.7rem;
+        }
+        .modal h3 { font-size: 1rem; margin-bottom: 1rem; }
+        .modal .detail-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 1rem;
+        }
+        .modal .detail-item .label { font-size: 0.6rem; color: var(--text-muted); text-transform: uppercase; }
+        .modal .detail-item .val { font-size: 0.8rem; font-weight: 600; }
+        .modal .event-list { list-style: none; }
+        .modal .event-list li {
+            padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+            font-size: 0.72rem; display: flex; gap: 0.5rem;
+        }
+        .modal .event-list li .ts { color: var(--text-muted); min-width: 70px; }
+        .modal .event-list li .ev-type { font-weight: 600; min-width: 80px; }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 768px) {
+            .main { padding: 0.75rem; }
+            .stats-grid { grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+            .stat-card { padding: 0.75rem; }
+            .stat-card .value { font-size: 1.2rem; }
+            .tabs { gap: 1px; }
+            .tab { padding: 0.4rem 0.65rem; font-size: 0.65rem; }
+            .tbl th, .tbl td { padding: 0.45rem 0.6rem; font-size: 0.65rem; }
+            .panel-header { padding: 0.6rem 0.8rem; }
+            .topbar { padding: 0.6rem 0.75rem; }
+            .topbar-title { font-size: 0.75rem; }
+            .modal .detail-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── LOGIN ── -->
+<div class="login-overlay" id="loginOverlay">
+    <div class="login-card">
+        <h2><i class="fas fa-shield-alt" style="color:var(--primary-light)"></i> Admin Panel</h2>
+        <p>Enter admin key to access voice agent analytics</p>
+        <input type="password" id="adminKeyInput" placeholder="Admin key" onkeydown="if(event.key==='Enter')doLogin()">
+        <button onclick="doLogin()"><i class="fas fa-sign-in-alt"></i> Sign In</button>
+        <div class="login-error" id="loginError">Invalid admin key</div>
+    </div>
+</div>
+
+<!-- ── MAIN APP ── -->
+<div class="app-wrap" id="appWrap">
+    <div class="topbar">
+        <div class="topbar-left">
+            <img src="/logo.png" alt="Logo">
+            <span class="topbar-title"><i class="fas fa-chart-bar"></i> Voice Agent Admin</span>
+        </div>
+        <div class="topbar-right">
+            <select id="periodSelect" class="topbar-btn" onchange="loadDashboard()">
+                <option value="1">Last 24h</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+            <a href="/voice-agent" class="topbar-btn"><i class="fas fa-headset"></i> Voice Agent</a>
+            <button class="topbar-btn" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Logout</button>
+        </div>
+    </div>
+
+    <div class="main">
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-tab="dashboard" onclick="switchTab('dashboard')"><i class="fas fa-chart-pie"></i> Dashboard</button>
+            <button class="tab" data-tab="sessions" onclick="switchTab('sessions')"><i class="fas fa-users"></i> Sessions</button>
+            <button class="tab" data-tab="queries" onclick="switchTab('queries')"><i class="fas fa-search"></i> All Queries</button>
+            <button class="tab" data-tab="failed" onclick="switchTab('failed')"><i class="fas fa-exclamation-triangle"></i> Failed Queries</button>
+            <button class="tab" data-tab="errors" onclick="switchTab('errors')"><i class="fas fa-bug"></i> Errors</button>
+            <button class="tab" data-tab="upload" onclick="switchTab('upload')"><i class="fas fa-upload"></i> Upload Data</button>
+        </div>
+
+        <!-- DASHBOARD TAB -->
+        <div class="tab-panel active" id="tab-dashboard">
+            <div class="stats-grid" id="statsGrid"></div>
+            <div class="panel">
+                <div class="panel-header"><span class="panel-title"><i class="fas fa-fire"></i> Top Queries</span></div>
+                <table class="tbl"><thead><tr><th>Query</th><th>Count</th><th>Avg Time</th></tr></thead><tbody id="topQueriesBody"></tbody></table>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><span class="panel-title"><i class="fas fa-microphone"></i> Voice Usage</span></div>
+                <table class="tbl"><thead><tr><th>Voice</th><th>Sessions</th></tr></thead><tbody id="voiceUsageBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- SESSIONS TAB -->
+        <div class="tab-panel" id="tab-sessions">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title"><i class="fas fa-users"></i> Recent Sessions</span>
+                    <button class="panel-action" onclick="loadSessions()"><i class="fas fa-sync"></i> Refresh</button>
+                </div>
+                <table class="tbl"><thead><tr><th>Session ID</th><th>Started</th><th>Duration</th><th>IP</th><th>Voice</th><th>Queries</th><th>Properties</th><th>Barge-ins</th></tr></thead><tbody id="sessionsBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- QUERIES TAB -->
+        <div class="tab-panel" id="tab-queries">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title"><i class="fas fa-search"></i> All Queries</span>
+                    <button class="panel-action" onclick="loadQueries(false)"><i class="fas fa-sync"></i> Refresh</button>
+                </div>
+                <table class="tbl"><thead><tr><th>Time</th><th>Query</th><th>Mode</th><th>Property?</th><th># Results</th><th>Time (ms)</th><th>Error</th></tr></thead><tbody id="queriesBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- FAILED QUERIES TAB -->
+        <div class="tab-panel" id="tab-failed">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title"><i class="fas fa-exclamation-triangle"></i> Failed Queries</span>
+                    <button class="panel-action" onclick="loadQueries(true)"><i class="fas fa-sync"></i> Refresh</button>
+                </div>
+                <table class="tbl"><thead><tr><th>Time</th><th>Query</th><th>Mode</th><th>Error</th><th>IP</th></tr></thead><tbody id="failedBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- ERRORS TAB -->
+        <div class="tab-panel" id="tab-errors">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title"><i class="fas fa-bug"></i> System Errors</span>
+                    <button class="panel-action" onclick="loadErrors()"><i class="fas fa-sync"></i> Refresh</button>
+                </div>
+                <table class="tbl"><thead><tr><th>Time</th><th>Type</th><th>Message</th><th>Session</th></tr></thead><tbody id="errorsBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- UPLOAD TAB -->
+        <div class="tab-panel" id="tab-upload">
+            <div class="panel">
+                <div class="panel-header"><span class="panel-title"><i class="fas fa-database"></i> Upload Property Database</span></div>
+                <div style="padding: 1.2rem;">
+                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p>Click or drag & drop an Excel file (.xlsx, .csv)</p>
+                        <p class="hint">The file should contain property listings with columns like: title, address, price, bedrooms, bathrooms, etc.</p>
+                    </div>
+                    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleFileUpload(this.files[0])">
+                    <div id="uploadProgress" style="display:none;">
+                        <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.8rem;color:var(--text-sub);">
+                            <i class="fas fa-spinner fa-spin" style="color:var(--primary-light)"></i> Uploading and processing...
+                        </div>
+                    </div>
+                    <div class="upload-result" id="uploadResult"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SESSION DETAIL MODAL -->
+<div class="modal-overlay" id="sessionModal" onclick="if(event.target===this)closeSessionModal()">
+    <div class="modal">
+        <button class="modal-close" onclick="closeSessionModal()"><i class="fas fa-times"></i></button>
+        <h3 id="sessionModalTitle">Session Detail</h3>
+        <div class="detail-grid" id="sessionDetailGrid"></div>
+        <div class="panel" style="margin-top:1rem;">
+            <div class="panel-header"><span class="panel-title">Queries</span></div>
+            <table class="tbl"><thead><tr><th>Time</th><th>Query</th><th>Response</th><th>Time (ms)</th></tr></thead><tbody id="sessionQueriesBody"></tbody></table>
+        </div>
+        <div class="panel" style="margin-top:1rem;">
+            <div class="panel-header"><span class="panel-title">Events</span></div>
+            <ul class="event-list" id="sessionEventsList"></ul>
+        </div>
+    </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let adminKey = localStorage.getItem('admin_key') || '';
+
+// ── Auth ──
+function doLogin() {
+    const key = document.getElementById('adminKeyInput').value.trim();
+    if (!key) return;
+    adminKey = key;
+    localStorage.setItem('admin_key', key);
+    testAuth();
+}
+function doLogout() {
+    adminKey = '';
+    localStorage.removeItem('admin_key');
+    document.getElementById('appWrap').classList.remove('active');
+    document.getElementById('loginOverlay').classList.remove('hidden');
+}
+async function testAuth() {
+    try {
+        const r = await apiFetch('/api/admin/dashboard?days=1');
+        if (r.ok) {
+            document.getElementById('loginOverlay').classList.add('hidden');
+            document.getElementById('appWrap').classList.add('active');
+            loadDashboard();
+        } else {
+            document.getElementById('loginError').style.display = 'block';
+        }
+    } catch (e) {
+        document.getElementById('loginError').style.display = 'block';
+    }
+}
+function apiFetch(url, opts = {}) {
+    opts.headers = { ...(opts.headers || {}), 'x-admin-key': adminKey };
+    return fetch(API + url, opts);
+}
+
+// ── Tabs ──
+function switchTab(tab) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + tab));
+    if (tab === 'sessions') loadSessions();
+    else if (tab === 'queries') loadQueries(false);
+    else if (tab === 'failed') loadQueries(true);
+    else if (tab === 'errors') loadErrors();
+}
+
+// ── Dashboard ──
+async function loadDashboard() {
+    const days = document.getElementById('periodSelect').value;
+    try {
+        const r = await apiFetch(`/api/admin/dashboard?days=${days}`);
+        const d = await r.json();
+
+        document.getElementById('statsGrid').innerHTML = `
+            <div class="stat-card accent"><div class="label">Total Sessions</div><div class="value">${d.total_sessions}</div><div class="sub">Last ${d.period_days} days</div></div>
+            <div class="stat-card green"><div class="label">Total Queries</div><div class="value">${d.total_queries}</div><div class="sub">${d.total_property_queries} property searches</div></div>
+            <div class="stat-card amber"><div class="label">Avg Response Time</div><div class="value">${d.avg_response_time_ms}ms</div></div>
+            <div class="stat-card"><div class="label">Avg Session Duration</div><div class="value">${formatDuration(d.avg_session_duration_sec)}</div></div>
+            <div class="stat-card red"><div class="label">Failed Queries</div><div class="value">${d.failed_queries}</div></div>
+            <div class="stat-card"><div class="label">Errors</div><div class="value">${d.total_errors}</div></div>
+            <div class="stat-card"><div class="label">Barge-ins</div><div class="value">${d.total_barge_ins}</div></div>
+        `;
+
+        const tqBody = document.getElementById('topQueriesBody');
+        tqBody.innerHTML = d.top_queries.length ? d.top_queries.map(q => `
+            <tr><td>${esc(q.query_text)}</td><td>${q.cnt}</td><td>${Math.round(q.avg_time || 0)}ms</td></tr>
+        `).join('') : '<tr><td colspan="3" class="empty-row">No queries yet</td></tr>';
+
+        const vuBody = document.getElementById('voiceUsageBody');
+        vuBody.innerHTML = d.voice_usage.length ? d.voice_usage.map(v => `
+            <tr><td>${esc(v.voice || 'default')}</td><td>${v.cnt}</td></tr>
+        `).join('') : '<tr><td colspan="2" class="empty-row">No data</td></tr>';
+    } catch (e) { console.error('Dashboard error:', e); }
+}
+
+// ── Sessions ──
+async function loadSessions() {
+    try {
+        const r = await apiFetch('/api/admin/sessions?limit=100');
+        const data = await r.json();
+        const body = document.getElementById('sessionsBody');
+        body.innerHTML = data.length ? data.map(s => `
+            <tr class="clickable" onclick="openSession('${s.id}')">
+                <td style="font-family:monospace;font-size:0.65rem">${s.id.slice(0,8)}…</td>
+                <td>${formatTime(s.started_at)}</td>
+                <td>${formatDuration(s.duration_seconds)}</td>
+                <td>${esc(s.ip_address||'—')}</td>
+                <td>${esc(s.voice||'default')}</td>
+                <td>${s.total_queries}</td>
+                <td>${s.total_properties_shown}</td>
+                <td>${s.total_barge_ins}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="8" class="empty-row">No sessions yet</td></tr>';
+    } catch (e) { console.error(e); }
+}
+
+// ── Queries ──
+async function loadQueries(failed) {
+    try {
+        const r = await apiFetch(`/api/admin/queries?limit=200&failed=${failed}`);
+        const data = await r.json();
+        if (failed) {
+            const body = document.getElementById('failedBody');
+            body.innerHTML = data.length ? data.map(q => `
+                <tr>
+                    <td>${formatTime(q.timestamp)}</td>
+                    <td>${esc(q.query_text)}</td>
+                    <td><span class="badge badge-blue">${q.query_mode}</span></td>
+                    <td style="color:var(--red)">${esc(q.error||'—')}</td>
+                    <td>${esc(q.ip_address||'—')}</td>
+                </tr>
+            `).join('') : '<tr><td colspan="5" class="empty-row">No failed queries</td></tr>';
+        } else {
+            const body = document.getElementById('queriesBody');
+            body.innerHTML = data.length ? data.map(q => `
+                <tr>
+                    <td>${formatTime(q.timestamp)}</td>
+                    <td title="${esc(q.query_text)}">${esc(q.query_text)}</td>
+                    <td><span class="badge badge-blue">${q.query_mode}</span></td>
+                    <td>${q.is_property_query ? '<span class="badge badge-green">Yes</span>' : '—'}</td>
+                    <td>${q.properties_returned || '—'}</td>
+                    <td>${q.response_time_ms || '—'}</td>
+                    <td>${q.error ? '<span class="badge badge-red">Error</span>' : '<span class="badge badge-green">OK</span>'}</td>
+                </tr>
+            `).join('') : '<tr><td colspan="7" class="empty-row">No queries yet</td></tr>';
+        }
+    } catch (e) { console.error(e); }
+}
+
+// ── Errors ──
+async function loadErrors() {
+    try {
+        const r = await apiFetch('/api/admin/errors?limit=100');
+        const data = await r.json();
+        const body = document.getElementById('errorsBody');
+        body.innerHTML = data.length ? data.map(e => `
+            <tr>
+                <td>${formatTime(e.timestamp)}</td>
+                <td><span class="badge badge-red">${esc(e.error_type)}</span></td>
+                <td>${esc(e.error_message||'')}</td>
+                <td style="font-family:monospace;font-size:0.6rem">${(e.session_id||'—').slice(0,8)}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="4" class="empty-row">No errors</td></tr>';
+    } catch (e) { console.error(e); }
+}
+
+// ── Session Detail ──
+async function openSession(id) {
+    try {
+        const r = await apiFetch(`/api/admin/sessions/${id}`);
+        const d = await r.json();
+        if (!d.session) return;
+        const s = d.session;
+        document.getElementById('sessionModalTitle').textContent = `Session ${s.id.slice(0,12)}…`;
+        document.getElementById('sessionDetailGrid').innerHTML = `
+            <div class="detail-item"><div class="label">Started</div><div class="val">${formatTime(s.started_at)}</div></div>
+            <div class="detail-item"><div class="label">Duration</div><div class="val">${formatDuration(s.duration_seconds)}</div></div>
+            <div class="detail-item"><div class="label">IP Address</div><div class="val">${esc(s.ip_address||'—')}</div></div>
+            <div class="detail-item"><div class="label">Voice</div><div class="val">${esc(s.voice||'default')}</div></div>
+            <div class="detail-item"><div class="label">Queries</div><div class="val">${s.total_queries}</div></div>
+            <div class="detail-item"><div class="label">Properties Shown</div><div class="val">${s.total_properties_shown}</div></div>
+            <div class="detail-item"><div class="label">Barge-ins</div><div class="val">${s.total_barge_ins}</div></div>
+        `;
+        document.getElementById('sessionQueriesBody').innerHTML = d.queries.length ? d.queries.map(q => `
+            <tr>
+                <td>${formatTime(q.timestamp)}</td>
+                <td>${esc(q.query_text)}</td>
+                <td style="max-width:200px">${esc((q.llm_response||'').slice(0,100))}</td>
+                <td>${q.response_time_ms||'—'}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="4" class="empty-row">No queries</td></tr>';
+        const evList = document.getElementById('sessionEventsList');
+        evList.innerHTML = d.events.length ? d.events.map(e => `
+            <li><span class="ts">${formatTime(e.timestamp)}</span><span class="ev-type">${esc(e.event_type)}</span><span>${esc(e.data||'')}</span></li>
+        `).join('') : '<li class="empty-row">No events</li>';
+        document.getElementById('sessionModal').classList.add('open');
+    } catch (e) { console.error(e); }
+}
+function closeSessionModal() { document.getElementById('sessionModal').classList.remove('open'); }
+
+// ── Upload ──
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => { e.preventDefault(); uploadZone.classList.remove('dragover'); if (e.dataTransfer.files.length) handleFileUpload(e.dataTransfer.files[0]); });
+
+async function handleFileUpload(file) {
+    if (!file) return;
+    const result = document.getElementById('uploadResult');
+    const progress = document.getElementById('uploadProgress');
+    result.style.display = 'none';
+    progress.style.display = 'block';
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const r = await fetch(API + '/api/admin/upload-properties', {
+            method: 'POST',
+            headers: { 'x-admin-key': adminKey },
+            body: formData
+        });
+        const d = await r.json();
+        progress.style.display = 'none';
+        result.style.display = 'block';
+        if (r.ok) {
+            result.className = 'upload-result success';
+            result.innerHTML = `<i class="fas fa-check-circle" style="color:var(--emerald)"></i> <strong>Upload successful!</strong><br>
+                ${d.total_rows ? `Processed ${d.total_rows} rows. ` : ''}
+                ${d.inserted ? `Inserted ${d.inserted} properties. ` : ''}
+                ${d.errors ? `${d.errors} errors. ` : ''}
+                ${d.message || ''}`;
+        } else {
+            result.className = 'upload-result error';
+            result.innerHTML = `<i class="fas fa-times-circle" style="color:var(--red)"></i> <strong>Upload failed:</strong> ${esc(d.detail || 'Unknown error')}`;
+        }
+    } catch (e) {
+        progress.style.display = 'none';
+        result.style.display = 'block';
+        result.className = 'upload-result error';
+        result.innerHTML = `<i class="fas fa-times-circle" style="color:var(--red)"></i> <strong>Error:</strong> ${esc(e.message)}`;
+    }
+    document.getElementById('fileInput').value = '';
+}
+
+// ── Helpers ──
+function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function formatTime(iso) {
+    if (!iso) return '—';
+    try { const d = new Date(iso + 'Z'); return d.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' }); }
+    catch(e) { return iso; }
+}
+function formatDuration(sec) {
+    if (!sec || sec <= 0) return '—';
+    if (sec < 60) return `${Math.round(sec)}s`;
+    if (sec < 3600) return `${Math.floor(sec/60)}m ${Math.round(sec%60)}s`;
+    return `${Math.floor(sec/3600)}h ${Math.floor((sec%3600)/60)}m`;
+}
+
+// ── Boot ──
+if (adminKey) testAuth();
+</script>
+</body>
+</html>

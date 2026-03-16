@@ -20,7 +20,7 @@ try:
 except ImportError:
     pass
 import websockets as ws_lib
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +33,13 @@ from backend.tts_handler import text_to_speech, tts_sentence, get_available_voic
 import httpx
 from backend.llm_handler import generate_response, generate_response_stream, build_messages
 from backend.qdrant_handler import search_properties, format_properties_for_llm
+from backend.analytics import (
+    init_db as init_analytics_db, create_session as analytics_create_session,
+    end_session as analytics_end_session, update_session_voice,
+    log_event, log_query, log_barge_in, log_error,
+    get_dashboard_stats, get_recent_sessions, get_session_detail,
+    get_recent_queries, get_recent_errors,
+)
 
 app = FastAPI(title="Adelphos Tech")
 
@@ -78,6 +85,8 @@ async def pregenerate_fillers():
             except Exception as e:
                 print(f"[FILLER] Failed '{phrase}': {e}")
     print(f"[FILLER] {len(filler_cache)} fillers ready ({len(filler_cache_general)} general)")
+    init_analytics_db()
+    print("[STARTUP] Analytics DB ready")
 
 # Mount frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
@@ -105,9 +114,75 @@ async def serve_logo():
     return FileResponse(os.path.join(FRONTEND_DIR, "logo.png"), media_type="image/png")
 
 
+@app.get("/admin")
+async def admin_page():
+    return FileResponse(os.path.join(FRONTEND_DIR, "admin", "index.html"))
+
+@app.get("/admin/")
+async def admin_page_slash():
+    return FileResponse(os.path.join(FRONTEND_DIR, "admin", "index.html"))
+
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+
+# ─── Admin API Endpoints ───
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "adelphos2024")
+
+def _check_admin(request):
+    key = request.headers.get("x-admin-key") or request.query_params.get("key")
+    if key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+@app.get("/api/admin/dashboard")
+async def admin_dashboard(request: Request, days: int = 7):
+    _check_admin(request)
+    return get_dashboard_stats(days)
+
+@app.get("/api/admin/sessions")
+async def admin_sessions(request: Request, limit: int = 50, offset: int = 0):
+    _check_admin(request)
+    return get_recent_sessions(limit, offset)
+
+@app.get("/api/admin/sessions/{session_id}")
+async def admin_session_detail(session_id: str, request: Request):
+    _check_admin(request)
+    return get_session_detail(session_id)
+
+@app.get("/api/admin/queries")
+async def admin_queries(request: Request, limit: int = 100, offset: int = 0, failed: bool = False):
+    _check_admin(request)
+    return get_recent_queries(limit, offset, failed)
+
+@app.get("/api/admin/errors")
+async def admin_errors(request: Request, limit: int = 50):
+    _check_admin(request)
+    return get_recent_errors(limit)
+
+@app.post("/api/admin/upload-properties")
+async def upload_properties(request: Request, file: UploadFile = File(...)):
+    """Upload Excel file with property data and ingest into Qdrant."""
+    _check_admin(request)
+    if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+        raise HTTPException(status_code=400, detail="File must be .xlsx, .xls, or .csv")
+    
+    import tempfile, shutil
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+    
+    try:
+        from backend.qdrant_handler import ingest_properties_from_file
+        result = await ingest_properties_from_file(tmp_path)
+        return result
+    except ImportError:
+        raise HTTPException(status_code=501, detail="Property ingestion not yet implemented")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.unlink(tmp_path)
 
 
 # ─── Chat Management ───
@@ -443,6 +518,9 @@ async def voice_ws(ws: WebSocket):
     await ws.accept()
     session = VoiceSession(ws)
     print(f"[WS] Voice session connected: {session.chat_id}")
+    # Analytics: create session
+    _client_ip = ws.client.host if ws.client else ""
+    analytics_create_session(session.chat_id, ip=_client_ip, user_agent="", voice=session.voice)
 
     # Ensure chat store entry exists
     if session.chat_id not in chat_store:
@@ -505,6 +583,7 @@ async def voice_ws(ws: WebSocket):
                 await send_audio(filler_audio, sentence_idx=-1, is_filler=True)
                 print(f"[WS] Filler sent at {_time.time()-t0:.2f}s")
         session.turn_count += 1
+        _query_t0 = _time.time()
 
         history = chat_store[session.chat_id]["messages"]
         t_build = _time.time()
@@ -627,7 +706,16 @@ async def voice_ws(ws: WebSocket):
                 "chat_id": session.chat_id,
             })
             session.is_ai_speaking = False
+            _resp_ms = int((_time.time() - _query_t0) * 1000)
             print(f"[WS] Full pipeline in {_time.time()-t0:.2f}s")
+            # Analytics: log query
+            try:
+                log_query(session.chat_id, user_text, mode="voice",
+                          is_property_query=is_prop_query,
+                          properties_returned=len(properties),
+                          llm_response=full_response, response_time_ms=_resp_ms)
+            except Exception:
+                pass
             accumulated_transcript.clear()  # reset for next utterance
             forwarding_audio = True  # resume forwarding PCM to Deepgram
             await ws.send_json({"type": "status", "status": "ready"})
@@ -903,6 +991,8 @@ async def voice_ws(ws: WebSocket):
                     if voice in ALLOWED_VOICES:
                         session.voice = voice
                         print(f"[WS] Voice changed to: {voice}")
+                        try: update_session_voice(session.chat_id, voice)
+                        except Exception: pass
                     await ws.send_json({"type": "voice_ack", "voice": session.voice})
 
                 elif msg_type == "announce_voice":
@@ -921,6 +1011,8 @@ async def voice_ws(ws: WebSocket):
 
                 elif msg_type == "barge_in":
                     print("[WS] Barge-in received")
+                    try: log_barge_in(session.chat_id)
+                    except Exception: pass
                     session.barged_in = True
                     session.is_ai_speaking = False
                     barge_in_time = time.time()
@@ -966,11 +1058,16 @@ async def voice_ws(ws: WebSocket):
         print(f"[WS] Voice session disconnected: {session.chat_id}")
     except Exception as e:
         print(f"[WS] Error: {e}")
+        try: log_error(session.chat_id, "ws_error", str(e))
+        except Exception: pass
         try:
             await ws.send_json({"type": "error", "message": str(e)})
         except Exception:
             pass
     finally:
+        # Analytics: end session
+        try: analytics_end_session(session.chat_id)
+        except Exception: pass
         # Clean up Deepgram connection
         if dg_reader_task:
             dg_reader_task.cancel()

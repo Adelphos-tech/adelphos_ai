@@ -1,10 +1,8 @@
 Options -Indexes
+
+# Redirect voice-agent to Render backend
 RewriteEngine On
+RewriteRule ^voice-agent/?$ https://adelphos-new-website.onrender.com/voice-agent [R=301,L]
 
-# Redirect old voice-agent.html to folder URL
-RewriteRule ^voice-agent\.html$ /voice-agent/ [R=301,L]
-
-# Standard fallback
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^ /index.html [L]
+# WordPress rules below (do not remove)
+# BEGIN WordPress

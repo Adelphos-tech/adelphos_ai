@@ -30,5 +30,8 @@ env/
 # Logs
 *.log
 
+# Analytics database
+analytics.db
+
 # Misc scratch files
 live_assistant_copy-2.html
