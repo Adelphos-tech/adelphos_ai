@@ -158,6 +158,93 @@ CURRENCY_KEYWORDS = {
 }
 
 
+# ── Intent Classifier ────────────────────────────────────────────────────────
+# Runs in <1ms (pure regex/set lookups), zero extra LLM calls.
+
+_INTENT_RULES: list[tuple[str, list[str]]] = [
+    ("greeting",         ["^hey$", "^hi$", "^hello$", "^yo$", "^hiya$", "^howdy$",
+                          "^hey there", "^hi there", "^hello there", "^good morning",
+                          "^good afternoon", "^good evening", "^what's up", "^sup "]),
+    ("price_inquiry",    ["how much", "what.s the price", "what is the price",
+                          "price range", "cost of", "pricing", "afford", "budget",
+                          "cheapest", "most expensive", "price.*condo", "condo.*price",
+                          "how expensive", "value", "worth"]),
+    ("currency_convert", ["in usd", "in dollar", "in ringgit", "in euro", "in pound",
+                          "in rupee", "in yen", "in yuan", "in aud", "convert",
+                          "equivalent in", "how much.*usd", "how much.*myr"]),
+    ("location_info",    ["tell me about", "what is.*district", "which district",
+                          "area like", "neighbourhood", "neighborhood", "near mrt",
+                          "near.*station", "good area", "best area", "popular area",
+                          "orchard road", "bukit timah", "holland village",
+                          "sentosa", "jurong", "tampines", "punggol", "woodlands",
+                          "marine parade", "katong", "bedok", "clementi", "bishan",
+                          "ang mo kio", "toa payoh", "novena", "marina bay", "cbd"]),
+    ("general_advice",   ["should i", "advise", "recommend", "better to", "difference between",
+                          "buy or rent", "rent or buy", "hdb vs", "vs condo", "freehold vs",
+                          "good investment", "investment potential", "roi", "capital gain",
+                          "first time buyer", "first-time", "foreigner.*buy", "pr.*buy",
+                          "loan", "mortgage", "stamp duty", "absd", "cpf", "ltvr",
+                          "how to buy", "process", "steps to"]),
+    ("property_followup", ["tell me more", "more about", "more details", "more info",
+                           "the first", "the second", "the third", "that one", "this one",
+                           "which one", "both", "all of them", "compare", "versus", " vs ",
+                           "cheaper option", "any other", "other option", "show more",
+                           "more listing", "another one", "similar", "like that",
+                           "view details", "link", "contact", "agent", "is it.*available",
+                           "still available", "any discount", "negotiable"]),
+    ("property_search",  ["looking for", "find me", "show me", "search for", "i want",
+                          "i need", "i.m looking", "any.*bedroom", "\\d.*bed", "bed.*room",
+                          "for sale", "for rent", "to rent", "to buy", "available.*condo",
+                          "available.*hdb", "available.*landed", "property.*under",
+                          "under.*million", "below.*sgd", "around.*sgd"]),
+    ("off_topic",        ["weather", "recipe", "sport", "football", "movie", "music",
+                          "stock market", "crypto", "politics", "news today",
+                          "tell me a joke", "what time is it"]),
+]
+
+# Pre-compile all patterns for speed
+import re as _re
+_COMPILED_RULES: list[tuple[str, list[_re.Pattern]]] = [
+    (intent, [_re.compile(p, _re.IGNORECASE) for p in patterns])
+    for intent, patterns in _INTENT_RULES
+]
+
+_INTENT_CONTEXT_HINTS: dict[str, str] = {
+    "greeting":          "[Intent: greeting] Keep reply to ONE warm sentence. Ask what they're looking for.",
+    "property_search":   "[Intent: property_search] User wants specific listings. Mention top 2-3 properties from context by name, price, location. Be concise.",
+    "property_followup": "[Intent: property_followup] User is asking about a previously mentioned property. Use the conversation history to answer specifically — don't re-list everything.",
+    "price_inquiry":     "[Intent: price_inquiry] User is asking about pricing. Give clear price ranges or specific prices. Mention PSF if available.",
+    "currency_convert":  "[Intent: currency_convert] User wants prices in another currency. Use the currency context provided and state both SGD and converted amount.",
+    "location_info":     "[Intent: location_info] User wants to know about a Singapore area or district. Give a brief, useful description — vibe, MRT access, typical prices.",
+    "general_advice":    "[Intent: general_advice] User wants property advice or guidance. Give a clear, opinionated recommendation in 2-3 sentences max.",
+    "off_topic":         "[Intent: off_topic] This is outside your domain. Politely redirect to Singapore property topics in one sentence.",
+}
+
+
+def classify_intent(text: str, history: list[dict] = None) -> str:
+    """
+    Classify user query intent using fast rule-based matching.
+    Falls back to 'property_search' if history shows recent property context.
+    Zero LLM calls — runs in <1ms.
+    """
+    t = text.strip()
+
+    for intent, patterns in _COMPILED_RULES:
+        for pat in patterns:
+            if pat.search(t):
+                return intent
+
+    # Contextual fallback: if recent history had property talk, treat as followup
+    if history:
+        recent = history[-4:]
+        for msg in recent:
+            c = (msg.get("content") or "").lower()
+            if any(kw in c for kw in ["sgd", "bedroom", "district", "listing", "sqft", "condo"]):
+                return "property_followup"
+
+    return "general_advice"
+
+
 def _detect_currency_request(text: str) -> str | None:
     """Detect if user is asking for a currency conversion."""
     t = text.lower()
@@ -194,6 +281,13 @@ async def build_messages(user_text: str, chat_history: list[dict] = None) -> tup
         rate = SGD_RATES[currency_code]
         currency_context = f"[Currency context: 1 SGD = {rate} {currency_code}. Use this rate to convert SGD prices if the user asks.]"
         messages.append({"role": "system", "content": currency_context})
+
+    # Inject intent context hint so the LLM knows exactly how to respond
+    intent = classify_intent(user_text, chat_history)
+    hint = _INTENT_CONTEXT_HINTS.get(intent, "")
+    if hint:
+        messages.append({"role": "system", "content": hint})
+    print(f"[LLM] Intent: {intent}")
 
     messages.append({"role": "user", "content": user_text})
     print(f"[LLM] build_messages total: {int((_time.time()-t0)*1000)}ms")
