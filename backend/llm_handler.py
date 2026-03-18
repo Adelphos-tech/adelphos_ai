@@ -177,12 +177,16 @@ async def build_messages(user_text: str, chat_history: list[dict] = None) -> tup
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    # Add last 4 messages from history for context
+    # Add last 10 messages from history for context (enough for multi-turn follow-ups)
     if chat_history:
-        recent = chat_history[-4:]
+        recent = chat_history[-10:]
         for msg in recent:
             if msg.get("role") in ["user", "assistant"] and msg.get("content"):
-                messages.append({"role": msg["role"], "content": msg["content"]})
+                # Trim very long assistant messages (property listings) to keep tokens low
+                content = msg["content"]
+                if msg["role"] == "assistant" and len(content) > 400:
+                    content = content[:400] + "…"
+                messages.append({"role": msg["role"], "content": content})
 
     # Inject currency context if user asked for conversion
     currency_code = _detect_currency_request(user_text)

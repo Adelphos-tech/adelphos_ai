@@ -333,12 +333,37 @@ PROPERTY_TRIGGERS = [
     "rent", "rental", "buy", "sale", "for sale", "for rent",
     "district", "location", "price", "budget", "sgd", "house", "home",
     "show me", "find me", "looking for", "available", "listing",
+    "sqft", "square feet", "psf", "freehold", "leasehold", "ec ", "mrt",
+    "orchard", "marina", "jurong", "tampines", "punggol", "woodlands",
+    "bukit timah", "holland", "katong", "bedok", "sentosa", "cbd",
 ]
 
-def _is_property_query(text: str) -> bool:
-    """Detect if user is asking about properties."""
+# Follow-up phrases that reference a previous property search
+_FOLLOWUP_TRIGGERS = [
+    "tell me more", "more about", "the first", "the second", "the third",
+    "that one", "this one", "which one", "both of them", "all of them",
+    "cheaper", "more expensive", "bigger", "smaller", "similar",
+    "what about", "how about", "any other", "other option", "different",
+    "show more", "more listings", "more options", "another one",
+    "compare", "difference", "between them", "is it", "does it have",
+    "view details", "more details", "link", "contact", "agent",
+]
+
+def _is_property_query(text: str, history: list[dict] = None) -> bool:
+    """Detect if user is asking about properties, including contextual follow-ups."""
     t = text.lower()
-    return any(kw in t for kw in PROPERTY_TRIGGERS)
+    # Direct keyword match
+    if any(kw in t for kw in PROPERTY_TRIGGERS):
+        return True
+    # Follow-up: check if recent history had property results
+    if history and any(kw in t for kw in _FOLLOWUP_TRIGGERS):
+        recent = history[-6:]
+        for msg in recent:
+            if msg.get("role") == "assistant":
+                c = (msg.get("content") or "").lower()
+                if any(kw in c for kw in ["sgd", "bedroom", "district", "sqft", "listing"]):
+                    return True
+    return False
 
 
 @app.post("/chat")
@@ -359,7 +384,7 @@ async def text_chat(request: dict):
     # Search properties if relevant
     properties = []
     property_context = ""
-    if _is_property_query(question):
+    if _is_property_query(question, history):
         try:
             properties = await search_properties(question, limit=4)
             if properties:
@@ -591,23 +616,33 @@ async def voice_ws(ws: WebSocket):
         history = chat_store[session.chat_id]["messages"]
         t_build = _time.time()
 
-        # ── Property search in parallel with LLM build ──
+        # ── Property search + message build in parallel to cut sequential latency ──
         properties = []
         property_context = ""
-        is_prop_query = _is_property_query(user_text)
+        is_prop_query = _is_property_query(user_text, history)
         print(f"[WS] Is property query: {is_prop_query} for '{user_text}'")
-        if is_prop_query:
+
+        async def _do_property_search():
+            if not is_prop_query:
+                return []
             try:
                 print(f"[WS] Searching properties for: '{user_text}'")
-                properties = await search_properties(user_text, limit=4)
-                print(f"[WS] Search returned {len(properties)} properties")
-                if properties:
-                    property_context = format_properties_for_llm(properties)
-                    print(f"[WS] Formatted property context: {len(property_context)} chars")
+                results = await search_properties(user_text, limit=4)
+                print(f"[WS] Search returned {len(results)} properties")
+                return results
             except Exception as e:
                 print(f"[WS] Property search error: {e}")
-                import traceback
-                traceback.print_exc()
+                return []
+
+        # Run property search and message building concurrently
+        search_results, _ = await asyncio.gather(
+            _do_property_search(),
+            asyncio.sleep(0),  # yield to event loop
+        )
+        properties = search_results
+        if properties:
+            property_context = format_properties_for_llm(properties)
+            print(f"[WS] Formatted property context: {len(property_context)} chars")
 
         augmented_text = user_text + (f"\n\n[Available listings:\n{property_context}]" if property_context else "")
         messages, _ = await build_messages(augmented_text, history)
