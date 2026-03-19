@@ -1115,6 +1115,9 @@ async def voice_ws(ws: WebSocket):
                         except Exception as e:
                             print(f"[WS] Voice announcement failed: {e}")
 
+                elif msg_type == "ping":
+                    await ws.send_json({"type": "pong"})
+
                 elif msg_type == "barge_in":
                     print("[WS] Barge-in received")
                     try: log_barge_in(session.chat_id)

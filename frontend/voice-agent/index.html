@@ -798,11 +798,27 @@ function sendChip(el) {
 }
 
 /* ── WebSocket ── */
+let _wsPingTimer = null;
+
+function _startWSPing() {
+    _stopWSPing();
+    _wsPingTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+        }
+    }, 20000); // every 20s — nginx proxy_read_timeout is typically 60s
+}
+
+function _stopWSPing() {
+    if (_wsPingTimer) { clearInterval(_wsPingTimer); _wsPingTimer = null; }
+}
+
 function connectWS() {
    const wsBase = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
     ws = new WebSocket(`${wsBase}/ws/voice`);
     ws.onopen  = () => {
         setConnStatus('online');
+        _startWSPing();
         // Create AudioContext immediately on connection (before first audio arrives)
         if (!playCtx || playCtx.state === 'closed') {
             playCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -817,7 +833,12 @@ function connectWS() {
             if (typeof e.data === 'string') handleWSMsg(JSON.parse(e.data));
         } catch(err) { console.error('[WS] message error:', err, e.data && e.data.slice(0,100)); }
     };
-    ws.onclose = (ev) => { console.warn('[WS] closed', ev.code, ev.reason); setConnStatus('offline'); setTimeout(connectWS, 3000); };
+    ws.onclose = (ev) => {
+        _stopWSPing();
+        console.warn('[WS] closed', ev.code, ev.reason);
+        setConnStatus('offline');
+        setTimeout(connectWS, 3000);
+    };
     ws.onerror = err => console.error('[WS] error:', err);
 }
 
