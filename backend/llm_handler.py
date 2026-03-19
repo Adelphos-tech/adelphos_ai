@@ -101,7 +101,7 @@ def generate_response(messages: list[dict], max_tokens: int = 300, temperature: 
         raise
 
 
-def generate_response_stream(messages: list[dict], max_tokens: int = 120, temperature: float = 0.85):
+def generate_response_stream(messages: list[dict], max_tokens: int = 400, temperature: float = 0.85):
     """
     Generate a streaming response from the local vLLM.
     Yields content chunks as they arrive.
