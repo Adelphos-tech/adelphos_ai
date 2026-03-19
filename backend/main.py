@@ -455,7 +455,7 @@ DEEPGRAM_BASE_URL = (
     "model=nova-2&encoding=linear16&sample_rate=16000&channels=1"
     "&punctuate=true&smart_format=true&filler_words=false"
     "&interim_results=true&endpointing=200"
-    "&vad_events=true&utterance_end_ms=800"
+    "&vad_events=true"
 )
 # Supported STT language codes (Deepgram nova-2)
 DEEPGRAM_LANG_CODES = {
