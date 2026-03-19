@@ -14,9 +14,15 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 
-# Lazy-initialized globals — deferred until first use so the app binds the port fast
+# Eagerly load model at import time — eliminates 3-4s cold-start on first query
+print(f"[QDRANT] Loading embedding model {EMBED_MODEL}...")
+_t0 = _time.time()
+_model: SentenceTransformer = SentenceTransformer(EMBED_MODEL)
+# Warm-up encode so PyTorch JIT is hot before first real query
+_model.encode("singapore property", convert_to_numpy=True)
+print(f"[QDRANT] Model ready in {int((_time.time()-_t0)*1000)}ms")
+
 _client: AsyncQdrantClient | None = None
-_model: SentenceTransformer | None = None
 _model_lock = asyncio.Lock()
 
 
@@ -29,15 +35,6 @@ def _get_client() -> AsyncQdrantClient:
 
 
 async def _get_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        async with _model_lock:
-            if _model is None:
-                print(f"[QDRANT] Loading embedding model {EMBED_MODEL}...")
-                t0 = _time.time()
-                loop = asyncio.get_event_loop()
-                _model = await loop.run_in_executor(None, SentenceTransformer, EMBED_MODEL)
-                print(f"[QDRANT] Model loaded in {int((_time.time()-t0)*1000)}ms")
     return _model
 
 

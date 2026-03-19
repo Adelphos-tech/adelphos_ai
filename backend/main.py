@@ -73,17 +73,30 @@ filler_cache: list[bytes] = []  # all fillers combined (fallback)
 async def pregenerate_fillers():
     """Pre-generate filler audio at startup so we can send them instantly."""
     import httpx as _httpx
+
+    # ── Pre-warm embedding model so first query doesn't pay 3-4s cold-start ──
+    async def _warm_embeddings():
+        try:
+            from backend.qdrant_handler import _encode_async
+            print("[STARTUP] Pre-warming embedding model...")
+            import time as _t; t0 = _t.time()
+            await _encode_async("singapore property condo hdb")
+            await _encode_async("bedroom bathroom price district")
+            print(f"[STARTUP] Embedding model warm in {int((_t.time()-t0)*1000)}ms")
+        except Exception as e:
+            print(f"[STARTUP] Embedding warm failed: {e}")
+
+    # Run filler TTS and embedding warm-up in parallel
+    import asyncio as _asyncio
     print("[FILLER] Pre-generating filler audio...")
     async with _httpx.AsyncClient(timeout=30.0) as client:
-        for phrase in FILLER_PHRASES_GENERAL:
-            try:
-                audio = await tts_sentence(phrase, client=client)
-                if audio:
-                    filler_cache_general.append(audio)
-                    filler_cache.append(audio)
-                    print(f"[FILLER] General: '{phrase}' ({len(audio)} bytes)")
-            except Exception as e:
-                print(f"[FILLER] Failed '{phrase}': {e}")
+        filler_tasks = [tts_sentence(phrase, client=client) for phrase in FILLER_PHRASES_GENERAL]
+        results = await _asyncio.gather(_warm_embeddings(), *[_asyncio.create_task(t) for t in filler_tasks], return_exceptions=True)
+    for i, audio in enumerate(results[1:]):
+        if isinstance(audio, bytes) and audio:
+            filler_cache_general.append(audio)
+            filler_cache.append(audio)
+            print(f"[FILLER] General: '{FILLER_PHRASES_GENERAL[i]}' ({len(audio)} bytes)")
     print(f"[FILLER] {len(filler_cache)} fillers ready ({len(filler_cache_general)} general)")
     init_analytics_db()
     print("[STARTUP] Analytics DB ready")
