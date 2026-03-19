@@ -26,24 +26,39 @@ TECH_KEYWORDS = [
 # ─── Post-processing correction map for common STT mishearings ───
 # Pattern → correct replacement (applied after Deepgram returns)
 _CORRECTIONS = [
-    # Adelphos mishearings
+    # ── Bedroom/bathroom number mishearings ──────────────────────────────
+    # "Iman" / "e-man" / "human" sounds like "2 BR" / "2 bed" in some accents
+    (r'\biman\b(?!\s+developer|\s+properties|\s+prop)', '2 bedroom'),
+    (r'\be[\s-]man\b', '2 bedroom'),
+    # "to be are" / "tube are" / "to bar" → 2BR
+    (r'\bto\s+be\s+are\b', '2 BR'),
+    (r'\btube?\s*are\b', '2 BR'),
+    # "three be are" / "free be are" → 3BR
+    (r'\b(three|free)\s+be\s+are\b', '3 BR'),
+    # numeric BR patterns normalisation
+    (r'\b(\d)\s*b\s*r\b', r'\1 BR'),
+    (r'\b(\d)\s*bed\s*room', r'\1 bedroom'),
+    (r'\b(\d)\s*bath\s*room', r'\1 bathroom'),
+    # "won bedroom" / "one bedroom"
+    (r'\bwon\s+bedroom\b', '1 bedroom'),
+    # ── Property type mishearings ─────────────────────────────────────────
+    (r'\bcon\s*do\b', 'condo'),
+    (r'\bh\s*d\s*b\b', 'HDB'),
+    (r'\bp\s*s\s*f\b', 'PSF'),
+    (r'\bs\s*g\s*d\b', 'SGD'),
+    (r'\ba\s*e\s*d\b', 'AED'),
+    # ── Adelphos mishearings ──────────────────────────────────────────────
     (r'\badel\s*foss?\b', 'Adelphos'),
     (r'\badel\s*foes?\b', 'Adelphos'),
     (r'\ba\s*delfus\b', 'Adelphos'),
-    # Flutter
+    # ── Tech terms ────────────────────────────────────────────────────────
     (r'\bflutter\b', 'Flutter'),
-    # React
     (r'\breact\b', 'React'),
-    # iOS
     (r'\bi\s*o\s*s\b', 'iOS'),
-    # API
     (r'\ba\s*p\s*i\b', 'API'),
-    # UI/UX
     (r'\bu\s*i\b', 'UI'),
     (r'\bu\s*x\b', 'UX'),
-    # WordPress
     (r'\bword\s*press\b', 'WordPress'),
-    # MVP
     (r'\bm\s*v\s*p\b', 'MVP'),
 ]
 
