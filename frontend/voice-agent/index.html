@@ -1178,7 +1178,7 @@ function renderPropertyCards(properties) {
         const areaHtml = area ? `<span><i class="fas fa-vector-square"></i> ${escHtml(area)}</span>` : '';
         const location = p.district || p.address || '';
         const imgHtml = p.image_url
-            ? `<img src="${escHtml(p.image_url)}" alt="${escHtml(p.title||'')}" loading="lazy" onerror="this.style.display='none';this.nextSibling.style.display='flex'">`
+            ? `<img src="${escHtml(p.image_url)}" alt="${escHtml(p.title||'')}" loading="lazy" style="cursor:pointer" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
             : '';
         const fallback = `<div style="display:${p.image_url ? 'none' : 'flex'};align-items:center;justify-content:center;width:100%;height:100%"><i class="fas fa-building"></i></div>`;
 
@@ -1187,7 +1187,7 @@ function renderPropertyCards(properties) {
         card.setAttribute('data-property-id', idx);
         card.setAttribute('data-property-title', (p.title || '').toLowerCase());
         card.setAttribute('data-property-location', (p.district || p.address || '').toLowerCase());
-        card.onclick = () => openPropModal(p);
+        card.onclick = (e) => openPropModal(p);
 
         card.innerHTML = `
             <div class="prop-rank">${idx + 1}</div>
@@ -1238,8 +1238,8 @@ function openPropModal(p) {
     // Gallery - main image
     const gallery = document.getElementById('propModalGallery');
     if (imgs.length) {
-        gallery.innerHTML = `<img id="propModalMainImg" src="${escHtml(imgs[0])}" alt="${escHtml(p.title||'')}"
-            onerror="this.src=''; this.parentElement.innerHTML='<div class=no-img><i class=fas fa-building></i></div>'">`;
+        gallery.innerHTML = `<img id="propModalMainImg" src="${escHtml(imgs[0])}" alt="${escHtml(p.title||'')}" style="cursor:pointer" onclick="this.requestFullscreen&&this.requestFullscreen()"
+            onerror="this.style.display='none'; this.insertAdjacentHTML('afterend','<div class=no-img><i class=fas fa-building></i></div>')">`;
     } else {
         gallery.innerHTML = '<div class="no-img"><i class="fas fa-building"></i></div>';
     }
@@ -1292,26 +1292,14 @@ function openPropModal(p) {
     if (p.description) { desc.textContent = p.description; desc.style.display='block'; }
     else { desc.style.display='none'; }
 
-    // Agent section
+    // Agent section — always show fixed contact
     const agentEl = document.getElementById('propModalAgent');
-    if (p.agent_name) {
-        agentEl.style.display = 'flex';
-        const photoHtml = p.agent_image
-            ? `<img src="${escHtml(p.agent_image)}" alt="${escHtml(p.agent_name)}" onerror="this.outerHTML='<div class=no-photo><i class=fas fa-user></i></div>'">`
-            : `<div class="no-photo"><i class="fas fa-user"></i></div>`;
-        agentEl.innerHTML = `${photoHtml}<div class="prop-modal-agent-info"><div class="name"><i class="fas fa-user-tie" style="opacity:0.5;margin-right:4px"></i>${escHtml(p.agent_name)}</div>${p.agent_agency ? `<div class="agency">${escHtml(p.agent_agency)}</div>` : ''}</div>`;
-    } else { agentEl.style.display = 'none'; }
+    agentEl.style.display = 'flex';
+    agentEl.innerHTML = `<div class="no-photo"><i class="fas fa-user-tie"></i></div><div class="prop-modal-agent-info"><div class="name"><i class="fas fa-user-tie" style="opacity:0.5;margin-right:4px"></i>Mohamed Habib</div><div class="agency"><i class="fas fa-phone" style="opacity:0.6;margin-right:4px"></i><a href="tel:+6590191311" style="color:inherit;text-decoration:none">+65 9019 1311</a></div></div>`;
 
-    // Footer buttons
+    // Footer buttons — only close button, no external link
     const footer = document.getElementById('propModalFooter');
     footer.innerHTML = '';
-    if (p.url) {
-        const btn = document.createElement('a');
-        btn.className = 'prop-modal-btn primary';
-        btn.href = p.url; btn.target = '_blank'; btn.rel = 'noopener noreferrer';
-        btn.innerHTML = '<i class="fas fa-external-link-alt"></i> View on listing site';
-        footer.appendChild(btn);
-    }
     const closeBtn = document.createElement('button');
     closeBtn.className = 'prop-modal-btn secondary';
     closeBtn.innerHTML = '<i class="fas fa-times"></i> Close';
