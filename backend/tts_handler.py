@@ -11,6 +11,19 @@ load_dotenv()
 TTS_API_URL = os.getenv("TTS_API_URL", "http://localhost:8020/tts")
 TTS_VOICE = os.getenv("TTS_VOICE", "rizwan.wav")
 
+# Persistent client — reuses TCP connection, avoids ~50-100ms handshake per call
+_shared_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_tts_client() -> httpx.AsyncClient:
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            timeout=30.0,
+            limits=httpx.Limits(max_keepalive_connections=4, keepalive_expiry=60),
+        )
+    return _shared_client
+
 
 async def text_to_speech(text: str, voice: str = None) -> Optional[bytes]:
     """
@@ -101,33 +114,29 @@ async def text_to_speech(text: str, voice: str = None) -> Optional[bytes]:
         return audio_segments[0] if audio_segments else None
 
 
+
+
 async def tts_sentence(text: str, voice: str = None, client: httpx.AsyncClient = None) -> Optional[bytes]:
     """
-    Convert a single sentence/fragment to speech. No chunking — fast single call.
-    Accepts an optional shared httpx client to avoid reconnection overhead.
+    Convert a single sentence to speech. Uses persistent shared client to avoid
+    TCP handshake overhead (~50-100ms) on every call.
     """
     voice = voice or TTS_VOICE
     text = text.strip()
     if not text:
         return None
-
-    should_close = False
-    if client is None:
-        client = httpx.AsyncClient(timeout=30.0)
-        should_close = True
-
     try:
-        response = await client.post(TTS_API_URL, json={"text": text, "voice": voice})
+        c = client or _get_tts_client()
+        response = await c.post(TTS_API_URL, json={"text": text, "voice": voice})
         if response.status_code == 200 and response.content:
             return response.content
-        print(f"[TTS] Sentence TTS failed: {response.status_code}")
+        print(f"[TTS] tts_sentence failed: {response.status_code}")
         return None
     except Exception as e:
-        print(f"[TTS] Sentence TTS error: {e}")
+        print(f"[TTS] tts_sentence error: {e}")
+        global _shared_client
+        _shared_client = None  # reset so next call gets a fresh connection
         return None
-    finally:
-        if should_close:
-            await client.aclose()
 
 
 async def get_available_voices() -> list:

@@ -58,12 +58,12 @@ chat_store: dict = {}
 
 # ─── Pre-cached filler audio (to fill silence during processing) ───
 FILLER_PHRASES_GENERAL = [
-    "Hmm, good question, give me a moment.",
-    "Let me think about that.",
+    "Hmm.",
     "One sec.",
-    "Okay, let me get back to you on that.",
-    "Let me look into that for you.",
-    "That's a great question, hold on.",
+    "Let me check.",
+    "Sure, hold on.",
+    "Okay.",
+    "Got it.",
 ]
 FILLER_PHRASES = FILLER_PHRASES_GENERAL
 filler_cache_general: list[bytes] = []
@@ -458,8 +458,8 @@ DEEPGRAM_BASE_URL = (
     "wss://api.deepgram.com/v1/listen?"
     "model=nova-2&encoding=linear16&sample_rate=16000&channels=1"
     "&punctuate=true&smart_format=true&filler_words=false"
-    "&interim_results=true&endpointing=300"
-    "&vad_events=true&utterance_end_ms=1000"
+    "&interim_results=true&endpointing=200"
+    "&vad_events=true&utterance_end_ms=800"
     f"&{_KW_PARAMS}"
 )
 # Supported STT language codes (Deepgram nova-2)
@@ -655,7 +655,15 @@ async def voice_ws(ws: WebSocket):
             except Exception:
                 pass
 
-        # ── Stream full LLM response ──
+        # ── Stream LLM + pipe first sentence to TTS immediately ──
+        _FILLER_RE = re.compile(
+            r'^(certainly|of course|sure thing|absolutely|great question|good question|'
+            r'that\'s a great question|happy to help|no problem|sure|got it|understood|'
+            r'great|of course|glad you asked)[!,.]?\s*',
+            re.IGNORECASE
+        )
+        _SENT_SPLIT = re.compile(r'(?<=[.!?])\s+')
+
         full_response = ""
         token_queue = asyncio.Queue()
 
@@ -669,14 +677,11 @@ async def voice_ws(ws: WebSocket):
 
         asyncio.get_event_loop().run_in_executor(None, _stream_llm)
 
-        _FILLER_RE = re.compile(
-            r'^(certainly|of course|sure thing|absolutely|great question|good question|'
-            r'that\'s a great question|happy to help|no problem|sure|got it|understood|'
-            r'great|of course|glad you asked)[!,.]?\s*',
-            re.IGNORECASE
-        )
-
         first_token_logged = False
+        first_tts_fired = False
+        first_tts_task = None
+        token_buf = ""
+
         while True:
             if session.barged_in:
                 print("[WS] Barge-in during LLM streaming, aborting")
@@ -694,41 +699,84 @@ async def voice_ws(ws: WebSocket):
             if not first_token_logged:
                 print(f"[WS] First LLM token at {_time.time()-t0:.2f}s")
                 first_token_logged = True
+            token_buf += token.replace('\n', ' ').replace('\r', '')
             full_response += token.replace('\n', ' ').replace('\r', '')
+
+            # Fire TTS on first complete sentence as soon as it appears
+            if not first_tts_fired and not session.barged_in:
+                # Look for first sentence boundary
+                m = _SENT_SPLIT.search(token_buf)
+                if m or len(token_buf) > 180:  # also fire if buffer is long enough
+                    split_at = m.start() + 1 if m else len(token_buf)
+                    first_sent = token_buf[:split_at].strip()
+                    token_buf = token_buf[split_at:]
+                    first_sent = first_sent.replace("**", "").replace("###", "").replace("---", "").strip()
+                    first_sent = _FILLER_RE.sub('', first_sent).strip()
+                    if first_sent and len(first_sent) > 8:
+                        first_tts_fired = True
+                        print(f"[WS] Firing first-sentence TTS at {_time.time()-t0:.2f}s: '{first_sent[:60]}'")
+                        first_tts_task = asyncio.ensure_future(
+                            tts_sentence(first_sent, voice=session.voice)
+                        )
 
         if session.barged_in:
             session.is_ai_speaking = False
             return
 
-        # ── Clean and send full response as single TTS call ──
+        # ── Clean full response ──
         clean = full_response.replace("**", "").replace("###", "").replace("---", "").strip()
         clean = _FILLER_RE.sub('', clean).strip()
         if clean:
             clean = clean[0].upper() + clean[1:]
 
-        print(f"[WS] LLM done at {_time.time()-t0:.2f}s, {len(clean)} chars — calling TTS")
+        print(f"[WS] LLM done at {_time.time()-t0:.2f}s, {len(clean)} chars")
 
-        if clean and not session.barged_in:
+        if not clean or session.barged_in:
+            pass
+        elif first_tts_task is not None:
+            # ── First sentence TTS already in-flight: await it then send, then TTS remainder ──
+            while not first_tts_task.done():
+                if session.barged_in:
+                    first_tts_task.cancel()
+                    break
+                await asyncio.sleep(0.03)
+            if not session.barged_in:
+                try:
+                    first_audio = first_tts_task.result()
+                except Exception:
+                    first_audio = None
+                if first_audio:
+                    if not session.is_ai_speaking:
+                        await ws.send_json({"type": "status", "status": "speaking"})
+                        session.is_ai_speaking = True
+                    print(f"[WS] ⚡ First-sentence audio at {_time.time()-t0:.2f}s ({len(first_audio)} bytes)")
+                    await send_audio(first_audio, sentence_idx=0)
+
+                # TTS the remainder (everything after the first sentence)
+                remainder = clean[len(clean.split('.')[0]):].strip().lstrip('.').strip() if '.' in clean else ""
+                if remainder and not session.barged_in:
+                    rem_audio = await tts_sentence(remainder, voice=session.voice)
+                    if rem_audio and not session.barged_in:
+                        await send_audio(rem_audio, sentence_idx=1)
+        else:
+            # ── Fallback: no first-sentence split, single TTS call ──
             tts_task = asyncio.ensure_future(tts_sentence(clean, voice=session.voice))
             while not tts_task.done():
                 if session.barged_in:
                     tts_task.cancel()
                     break
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.03)
             if not session.barged_in:
                 try:
                     audio = tts_task.result()
                 except Exception:
                     audio = None
                 if audio:
-                    try:
-                        if not session.is_ai_speaking:
-                            await ws.send_json({"type": "status", "status": "speaking"})
-                            session.is_ai_speaking = True
-                        print(f"[WS] ⚡ Audio ready at {_time.time()-t0:.2f}s ({len(audio)} bytes, {len(clean)} chars)")
-                        await send_audio(audio, sentence_idx=0)
-                    except Exception:
-                        pass
+                    if not session.is_ai_speaking:
+                        await ws.send_json({"type": "status", "status": "speaking"})
+                        session.is_ai_speaking = True
+                    print(f"[WS] ⚡ Audio ready at {_time.time()-t0:.2f}s ({len(audio)} bytes)")
+                    await send_audio(audio, sentence_idx=0)
 
         if session.barged_in:
             session.is_ai_speaking = False
