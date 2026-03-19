@@ -450,17 +450,12 @@ async def list_voices():
 SAMPLE_RATE = 16000
 BARGE_ENERGY_DB = -38.0      # energy level for barge-in detection
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
-# Build keyword boost query params from the shared list in stt_handler
-_KW_PARAMS = "&".join(
-    f"keywords={kw.replace(' ', '%20')}" for kw in TECH_KEYWORDS
-)
 DEEPGRAM_BASE_URL = (
     "wss://api.deepgram.com/v1/listen?"
     "model=nova-2&encoding=linear16&sample_rate=16000&channels=1"
     "&punctuate=true&smart_format=true&filler_words=false"
     "&interim_results=true&endpointing=200"
     "&vad_events=true&utterance_end_ms=800"
-    f"&{_KW_PARAMS}"
 )
 # Supported STT language codes (Deepgram nova-2)
 DEEPGRAM_LANG_CODES = {
