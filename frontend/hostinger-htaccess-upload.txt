@@ -1,6 +1,6 @@
 # Redirect voice-agent to Render backend (ADD THESE 2 LINES AT THE TOP OF YOUR EXISTING .htaccess)
 RewriteEngine On
-RewriteRule ^voice-agent/?$ https://adelphos-new-website.onrender.com/voice-agent [R=301,L]
+RewriteRule ^voice-agent/?$ https://adelphostech.com/voice-agent [R=301,L]
 
 # BEGIN WordPress
 <IfModule mod_rewrite.c>

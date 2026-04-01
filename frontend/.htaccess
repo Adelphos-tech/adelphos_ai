@@ -1,8 +1,8 @@
 Options -Indexes
 
-# Redirect voice-agent to Render backend
+# Redirect voice-agent to adelphostech.com
 RewriteEngine On
-RewriteRule ^voice-agent/?$ https://adelphos-new-website.onrender.com/voice-agent [R=301,L]
+RewriteRule ^voice-agent/?$ https://adelphostech.com/voice-agent [R=301,L]
 
 # WordPress rules below (do not remove)
 # BEGIN WordPress
