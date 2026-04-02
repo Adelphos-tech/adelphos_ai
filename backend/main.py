@@ -22,8 +22,7 @@ except ImportError:
 import websockets as ws_lib
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import Response
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -101,39 +100,8 @@ async def pregenerate_fillers():
     init_analytics_db()
     print("[STARTUP] Analytics DB ready")
 
-# Mount frontend
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
-if os.path.exists(FRONTEND_DIR):
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
 
-@app.get("/")
-async def read_root():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
-
-
-@app.get("/voice-agent")
-async def voice_agent_page():
-    return FileResponse(os.path.join(FRONTEND_DIR, "voice-agent", "index.html"))
-
-
-@app.get("/voice-agent/")
-async def voice_agent_page_slash():
-    return FileResponse(os.path.join(FRONTEND_DIR, "voice-agent", "index.html"))
-
-
-@app.get("/logo.png")
-async def serve_logo():
-    return FileResponse(os.path.join(FRONTEND_DIR, "logo.png"), media_type="image/png")
-
-
-@app.get("/admin")
-async def admin_page():
-    return FileResponse(os.path.join(FRONTEND_DIR, "admin", "index.html"))
-
-@app.get("/admin/")
-async def admin_page_slash():
-    return FileResponse(os.path.join(FRONTEND_DIR, "admin", "index.html"))
 
 @app.get("/health")
 async def health_check():
