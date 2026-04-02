@@ -769,9 +769,8 @@
 })();
 
 /* ═══════════════ APP STATE ═══════════════ */
-// When hosted on Hostinger (static), all API calls go to the Render backend.
-// On localhost the origin itself is the backend.
-const API_URL = window.location.origin;
+// Backend is always adelphostech.com regardless of where frontend is hosted
+const API_URL = 'https://adelphostech.com';
 let chatId = null, mode = 'voice';
 let ws = null, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
 let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null, analyser = null;
@@ -814,7 +813,7 @@ function _stopWSPing() {
 }
 
 function connectWS() {
-   const wsBase = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+   const wsBase = 'wss://adelphostech.com';
     ws = new WebSocket(`${wsBase}/ws/voice`);
     ws.onopen  = () => {
         setConnStatus('online');
