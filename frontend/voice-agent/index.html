@@ -769,12 +769,12 @@
 })();
 
 /* ═══════════════ APP STATE ═══════════════ */
-// Backend API subdomain — frontend can be hosted anywhere (Hostinger etc)
-const API_URL = 'https://api.adelphostech.com';
-let chatId = null, mode = 'voice';
-let ws = null, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
+const WS_URL = 'wss://assistant.apilproperties.com/assistant_stream_live';
+const VOICE_REF = 'test.wav'; // voice reference for TTS
+let mode = 'voice';
+let ws = null, wsReady = false, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
 let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null, analyser = null;
-const TARGET_RATE = 16000;
+let _ttsRate = 24000; // server tells us via audio_format message
 
 const chatEl        = document.getElementById('chat');
 const emptyState    = document.getElementById('empty-state');
@@ -797,43 +797,28 @@ function sendChip(el) {
 }
 
 /* ── WebSocket ── */
-let _wsPingTimer = null;
-
-function _startWSPing() {
-    _stopWSPing();
-    _wsPingTimer = setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-        }
-    }, 20000); // every 20s — nginx proxy_read_timeout is typically 60s
-}
-
-function _stopWSPing() {
-    if (_wsPingTimer) { clearInterval(_wsPingTimer); _wsPingTimer = null; }
-}
-
 function connectWS() {
-   const wsBase = 'wss://api.adelphostech.com';
-    ws = new WebSocket(`${wsBase}/ws/voice`);
-    ws.onopen  = () => {
-        setConnStatus('online');
-        _startWSPing();
-        // Create AudioContext immediately on connection (before first audio arrives)
+    wsReady = false;
+    ws = new WebSocket(WS_URL);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+        console.log('[WS] connected');
+        // Create AudioContext immediately on user gesture
         if (!playCtx || playCtx.state === 'closed') {
             playCtx = new (window.AudioContext || window.webkitAudioContext)();
-            console.log('[audio] created AudioContext on WS connect, state:', playCtx.state);
         }
-        if (chatId) ws.send(JSON.stringify({ type: 'set_chat_id', chat_id: chatId }));
-        const selVoice = document.getElementById('voice-select');
-        if (selVoice && selVoice.value) ws.send(JSON.stringify({ type: 'set_voice', voice: selVoice.value }));
     };
     ws.onmessage = e => {
-        try {
-            if (typeof e.data === 'string') handleWSMsg(JSON.parse(e.data));
-        } catch(err) { console.error('[WS] message error:', err, e.data && e.data.slice(0,100)); }
+        if (e.data instanceof ArrayBuffer) {
+            // Binary = PCM16 TTS audio from server
+            handlePCMAudio(e.data);
+        } else {
+            try { handleWSMsg(JSON.parse(e.data)); }
+            catch(err) { console.error('[WS] parse error:', err); }
+        }
     };
     ws.onclose = (ev) => {
-        _stopWSPing();
+        wsReady = false;
         console.warn('[WS] closed', ev.code, ev.reason);
         setConnStatus('offline');
         setTimeout(connectWS, 3000);
@@ -842,41 +827,85 @@ function connectWS() {
 }
 
 function handleWSMsg(msg) {
+    console.log('[WS] msg:', msg.type, msg);
     switch (msg.type) {
-        case 'user_text':           clearInterim(); hideProc(); addMsg(msg.text, 'user'); break;
-        case 'ai_text':             removeTyping(); hideProc(); addMsg(msg.text, 'assistant'); highlightPropertyMentions(msg.text); chatId = msg.chat_id || chatId; break;
-        case 'ai_audio':            handleAudioMsg(msg); break;
-        case 'interim_transcript':  
-            showInterim(msg.text);
-            // Immediate barge-in: stop AI audio when user starts speaking (AI-tutor-D pattern)
-            const trimmed = msg.text ? msg.text.trim() : '';
-            console.log(`[barge] interim: "${trimmed}" (len=${trimmed.length}, isAISpeaking=${isAISpeaking})`);
-            if (trimmed.length > 2 && isAISpeaking) {
-                console.log('[barge] ✂️ STOPPING AI AUDIO');
-                stopAI();
+        case 'audio_format':
+            // Server handshake — tells us TTS audio rate, then we send config
+            _ttsRate = msg.rate || 24000;
+            ws.send(JSON.stringify({ reference_audio: VOICE_REF, language: null }));
+            console.log('[WS] sent config, ttsRate=', _ttsRate);
+            break;
+        case 'style_ready':
+            // Backend ready — mark WS as ready for use
+            wsReady = true;
+            setConnStatus('online');
+            console.log('[WS] style_ready — ready for voice/text');
+            break;
+        case 'asr_final':
+            // User speech transcribed
+            clearInterim();
+            if (msg.text && msg.text.trim()) {
+                hideEmpty();
+                addMsg(msg.text.trim(), 'user');
+                addTyping();
+                isProcessing = true;
+                updateMicUI();
             }
             break;
-        case 'barge_in_ack':        stopAI(); clearInterim(); break;
-        case 'status':              handleStatus(msg.status); break;
-        case 'properties':          
-            console.log('[properties] Received:', msg.data?.length || 0, 'properties');
-            renderPropertyCards(msg.data); 
+        case 'asr_ignored':
+            clearInterim();
+            isProcessing = false;
+            updateMicUI();
             break;
-        case 'error':               hideProc(); removeTyping(); isProcessing = false; addMsg('Error: ' + msg.message, 'assistant'); break;
-    }
-}
-
-function handleStatus(s) {
-    if (s === 'thinking') { addTyping(); }
-    else if (s === 'ready') {
-        removeTyping(); isProcessing = false;
-        // DON'T reset isAISpeaking here — let audio queue manage it
-        // (backend sends 'ready' after chunks are sent, but playback continues)
-        if (!qRunning && !slots.length && !curSrc) {
-            isAISpeaking = false;
+        case 'llm_text':
+            // AI response text
+            removeTyping();
+            if (msg.text && msg.text.trim()) {
+                hideEmpty();
+                addMsg(msg.text.trim(), 'assistant');
+            }
+            isProcessing = false;
+            break;
+        case 'search_results':
+            // Property results
+            if (msg.data && msg.data.properties && msg.data.properties.length) {
+                console.log('[properties] Received:', msg.data.properties.length);
+                renderPropertyCards(msg.data.properties);
+            }
+            break;
+        case 'tts_start':
+            removeTyping();
+            isAISpeaking = true;
+            isListening = false;
+            isProcessing = false;
+            stopBargeMonitor();
+            updateMicUI();
+            startBargeMonitor();
+            break;
+        case 'tts_end':
+            // Audio stream done — let queue drain naturally
+            break;
+        case 'stop_audio':
+        case 'barge_detected':
+        case 'cancelled':
+            stopAI();
+            clearInterim();
+            isProcessing = false;
             isListening = callActive;
             updateMicUI();
-        }
+            break;
+        case 'error':
+            hideProc();
+            removeTyping();
+            isProcessing = false;
+            addMsg('Error: ' + (msg.message || 'Unknown error'), 'assistant');
+            break;
+        case 'rx_info':
+        case 'asr_partial_info':
+        case 'first_speech':
+            break; // informational only
+        default:
+            console.log('[WS] unhandled type:', msg.type);
     }
 }
 
@@ -895,80 +924,60 @@ function setConnStatus(s) {
     }
 }
 
-/* ── Audio Playback ── */
-let playCtx = null, curSrc = null, playGen = 0, slots = [], nextSlotId = 0, qRunning = false;
-// chunk accumulator: key = sentence_idx, value = { chunks: [], total, received }
-const audioChunks = {};
+/* ── Audio Playback (PCM16 streaming from server) ── */
+let playCtx = null, curSrc = null, playGen = 0, qRunning = false;
+let _pcmQueue = []; // queued Float32Array buffers ready to play
+let _pcmAccum = new Int16Array(0); // accumulate incoming PCM16 chunks
+
 function getPlayCtx() {
     if (!playCtx || playCtx.state === 'closed') playCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (playCtx.state === 'suspended') playCtx.resume();
     return playCtx;
 }
-function handleAudioMsg(msg) {
-    // Single-chunk (legacy) or multi-chunk support
-    const total = msg.total_chunks || 1;
-    const idx   = msg.chunk_index !== undefined ? msg.chunk_index : 0;
-    const key   = msg.sentence_idx;
-    if (!audioChunks[key]) audioChunks[key] = { parts: new Array(total), received: 0, total };
-    audioChunks[key].parts[idx] = msg.data;
-    audioChunks[key].received++;
-    console.log(`[audio] chunk ${idx+1}/${total} for sentence ${key}`);
-    if (audioChunks[key].received === total) {
-        // All chunks received — concatenate and play
-        const joined = audioChunks[key].parts.join('');
-        delete audioChunks[key];
-        console.log(`[audio] all chunks received, playing ${joined.length} b64 chars`);
-        playB64(joined, msg.is_filler);
-    }
+
+function handlePCMAudio(arrayBuf) {
+    // Server sends raw PCM16 LE at _ttsRate (24000 Hz), 1 channel
+    // Accumulate and schedule playback
+    const myGen = playGen;
+    const i16 = new Int16Array(arrayBuf);
+    // Convert to float32
+    const f32 = new Float32Array(i16.length);
+    for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768.0;
+    _pcmQueue.push({ f32, gen: myGen });
+    if (!qRunning) drainPCM();
 }
-function playB64(b64, isFiller) {
-    console.log(`[audio] playB64 called: ${b64.length} b64 chars, isFiller=${isFiller}`);
-    if (!isFiller) { isListening = false; isAISpeaking = true; updateMicUI(); startBargeMonitor(); }
-    const sid = nextSlotId++, slot = { id: sid, buf: null, ready: false };
-    slots.push(slot); const myGen = playGen;
-    const bin = atob(b64), ab = new ArrayBuffer(bin.length), v = new Uint8Array(ab);
-    for (let i = 0; i < bin.length; i++) v[i] = bin.charCodeAt(i);
-    console.log(`[audio] decoding ${ab.byteLength} bytes, AudioContext state: ${getPlayCtx().state}`);
-    getPlayCtx().decodeAudioData(ab)
-        .then(buf  => { 
-            console.log(`[audio] decode success, duration=${buf.duration}s`);
-            if (playGen !== myGen) { console.warn('[audio] playGen mismatch, skipping'); return; }
-            slot.buf = buf; slot.ready = true; drainQ(myGen); 
-        })
-        .catch(err => { console.error('[audio] decode error:', err); slot.ready = true; drainQ(myGen); });
-    drainQ(myGen);
-}
-function drainQ(g) { 
-    if (qRunning) { console.log('[audio] drainQ: already running'); return; }
-    if (playGen !== g) { console.log('[audio] drainQ: gen mismatch'); return; }
-    if (!slots.length) { console.log('[audio] drainQ: no slots'); return; }
-    if (!slots[0].ready) { console.log('[audio] drainQ: slot not ready'); return; }
-    console.log('[audio] drainQ: starting playback');
-    qRunning = true; playNext(g); 
-}
-function playNext(g) {
-    if (playGen !== g) { qRunning = false; return; }
-    while (slots.length && slots[0].ready && !slots[0].buf) slots.shift();
-    if (!slots.length) {
-        qRunning = false;
-        // Audio queue empty — NOW mark AI as not speaking
-        console.log('[audio] queue empty, isAISpeaking → false');
-        isAISpeaking = false; isListening = callActive; updateMicUI();
-        return;
-    }
-    const s = slots[0]; if (!s.ready) { qRunning = false; return; } slots.shift();
-    const ctx = getPlayCtx(); curSrc = ctx.createBufferSource(); curSrc.buffer = s.buf;
+
+function drainPCM() {
+    if (qRunning || !_pcmQueue.length) return;
+    const item = _pcmQueue.shift();
+    if (item.gen !== playGen) { drainPCM(); return; }
+    qRunning = true;
+    const ctx = getPlayCtx();
+    const buf = ctx.createBuffer(1, item.f32.length, _ttsRate);
+    buf.copyToChannel(item.f32, 0);
+    curSrc = ctx.createBufferSource();
+    curSrc.buffer = buf;
     curSrc.connect(ctx.destination);
-    curSrc.onended = () => { 
-        console.log('[audio] playback ended');
-        if (playGen !== g) { qRunning = false; return; } 
-        curSrc = null; playNext(g); 
+    curSrc.onended = () => {
+        if (playGen !== item.gen) { qRunning = false; return; }
+        curSrc = null;
+        qRunning = false;
+        if (_pcmQueue.length) {
+            drainPCM();
+        } else {
+            // Queue empty — AI done speaking
+            isAISpeaking = false;
+            isListening = callActive;
+            updateMicUI();
+        }
     };
-    console.log(`[audio] starting playback, duration=${s.buf.duration}s`);
     curSrc.start(0);
 }
+
 function stopAI() {
-    playGen++; slots = []; qRunning = false; nextSlotId = 0;
+    playGen++;
+    _pcmQueue = [];
+    qRunning = false;
     if (curSrc) { try { curSrc.stop(); } catch (e) {} curSrc = null; }
     if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     isAISpeaking = false;
@@ -990,7 +999,7 @@ function monitorBarge() {
 function triggerBarge() {
     if (!isAISpeaking) return;
     stopBargeMonitor(); stopAI();
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'barge_in' }));
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'cancel' }));
 }
 
 /* ── Interim Transcript ── */
@@ -1057,14 +1066,10 @@ async function startCall() {
         processor  = audioContext.createScriptProcessor(4096, 1, 1);
         processor.onaudioprocess = e => {
             const out = e.outputBuffer.getChannelData(0); for (let j = 0; j < out.length; j++) out[j] = 0;
-            if (!callActive || !ws || ws.readyState !== WebSocket.OPEN) return;
-            const inp = e.inputBuffer.getChannelData(0); let smp;
-            if (rate === TARGET_RATE) { smp = inp; } else {
-                const r = rate / TARGET_RATE, nl = Math.floor(inp.length / r); smp = new Float32Array(nl);
-                for (let i = 0; i < nl; i++) smp[i] = inp[Math.floor(i * r)];
-            }
-            const i16 = new Int16Array(smp.length);
-            for (let i = 0; i < smp.length; i++) { const s = Math.max(-1, Math.min(1, smp[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
+            if (!callActive || !ws || ws.readyState !== WebSocket.OPEN || !wsReady) return;
+            const inp = e.inputBuffer.getChannelData(0);
+            const i16 = new Int16Array(inp.length);
+            for (let i = 0; i < inp.length; i++) { const s = Math.max(-1, Math.min(1, inp[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
             ws.send(i16.buffer);
         };
         sourceNode.connect(processor); processor.connect(audioContext.destination);
@@ -1118,20 +1123,18 @@ function setMode(m) {
 textInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); } });
 
 /* ── Text Send ── */
-async function sendText() {
+function sendText() {
     const t = textInput.value.trim(); if (!t) return;
     textInput.value = '';
     hideEmpty(); addMsg(t, 'user'); addTyping();
-    try {
-        const r = await fetch(`${API_URL}/chat`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: t, chat_id: chatId })
-        });
-        const d = await r.json(); removeTyping();
-        if (d.response)  { addMsg(d.response, 'assistant'); chatId = d.chat_id || chatId; }
-        else if (d.error){ addMsg('Error: ' + d.error, 'assistant'); }
-        if (d.properties && d.properties.length) renderPropertyCards(d.properties);
-    } catch (e) { removeTyping(); addMsg('Could not connect to the server. Please try again.', 'assistant'); }
+    isProcessing = true;
+    if (ws && ws.readyState === WebSocket.OPEN && wsReady) {
+        ws.send(JSON.stringify({ type: 'text', text: t }));
+    } else {
+        removeTyping();
+        isProcessing = false;
+        addMsg('Not connected. Please wait and try again.', 'assistant');
+    }
 }
 
 /* ── Helpers ── */
