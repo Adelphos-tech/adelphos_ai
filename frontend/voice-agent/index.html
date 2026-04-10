@@ -769,12 +769,10 @@
 })();
 
 /* ═══════════════ APP STATE ═══════════════ */
-const WS_URL = 'wss://assistant.apilproperties.com/assistant_stream_live';
-const VOICE_REF = 'test.wav'; // voice reference for TTS
+const WS_URL = 'wss://assistant.apilproperties.com/ws/voice';
 let mode = 'voice';
 let ws = null, wsReady = false, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
-let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null, analyser = null;
-let _ttsRate = 24000; // server tells us via audio_format message
+let currentAudio = null, micStream = null, mediaRecorder = null, audioChunks = [];
 
 const chatEl        = document.getElementById('chat');
 const emptyState    = document.getElementById('empty-state');
@@ -800,22 +798,10 @@ function sendChip(el) {
 function connectWS() {
     wsReady = false;
     ws = new WebSocket(WS_URL);
-    ws.binaryType = 'arraybuffer';
-    ws.onopen = () => {
-        console.log('[WS] connected');
-        // Create AudioContext immediately on user gesture
-        if (!playCtx || playCtx.state === 'closed') {
-            playCtx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-    };
+    ws.onopen = () => console.log('[WS] connected');
     ws.onmessage = e => {
-        if (e.data instanceof ArrayBuffer) {
-            // Binary = PCM16 TTS audio from server
-            handlePCMAudio(e.data);
-        } else {
-            try { handleWSMsg(JSON.parse(e.data)); }
-            catch(err) { console.error('[WS] parse error:', err); }
-        }
+        try { handleWSMsg(JSON.parse(e.data)); }
+        catch(err) { console.error('[WS] parse error:', err, e.data); }
     };
     ws.onclose = (ev) => {
         wsReady = false;
@@ -829,20 +815,29 @@ function connectWS() {
 function handleWSMsg(msg) {
     console.log('[WS] msg:', msg.type, msg);
     switch (msg.type) {
-        case 'audio_format':
-            // Server handshake — tells us TTS audio rate, then we send config
-            _ttsRate = msg.rate || 24000;
-            ws.send(JSON.stringify({ reference_audio: VOICE_REF, language: null }));
-            console.log('[WS] sent config, ttsRate=', _ttsRate);
+        case 'status':
+            if (msg.status === 'ready') {
+                wsReady = true;
+                setConnStatus('online');
+                if (!isAISpeaking) {
+                    isProcessing = false;
+                    isListening = callActive;
+                    updateMicUI();
+                }
+            } else if (msg.status === 'thinking') {
+                isProcessing = true;
+                isListening = false;
+                updateMicUI();
+            } else if (msg.status === 'speaking') {
+                isAISpeaking = true;
+                isListening = false;
+                isProcessing = false;
+                removeTyping();
+                updateMicUI();
+                startBargeMonitor();
+            }
             break;
-        case 'style_ready':
-            // Backend ready — mark WS as ready for use
-            wsReady = true;
-            setConnStatus('online');
-            console.log('[WS] style_ready — ready for voice/text');
-            break;
-        case 'asr_final':
-            // User speech transcribed
+        case 'user_text':
             clearInterim();
             if (msg.text && msg.text.trim()) {
                 hideEmpty();
@@ -852,58 +847,41 @@ function handleWSMsg(msg) {
                 updateMicUI();
             }
             break;
-        case 'asr_ignored':
-            clearInterim();
-            isProcessing = false;
-            updateMicUI();
+        case 'interim_transcript':
+            showInterim(msg.text || '');
             break;
-        case 'llm_text':
-            // AI response text
+        case 'ai_text':
             removeTyping();
             if (msg.text && msg.text.trim()) {
                 hideEmpty();
                 addMsg(msg.text.trim(), 'assistant');
             }
-            isProcessing = false;
             break;
-        case 'search_results':
-            // Property results
-            if (msg.data && msg.data.properties && msg.data.properties.length) {
-                console.log('[properties] Received:', msg.data.properties.length);
-                renderPropertyCards(msg.data.properties);
-            }
+        case 'ai_audio':
+            playBase64Audio(msg.data);
             break;
-        case 'tts_start':
-            removeTyping();
-            isAISpeaking = true;
-            isListening = false;
-            isProcessing = false;
-            stopBargeMonitor();
-            updateMicUI();
-            startBargeMonitor();
+        case 'ai_audio_done':
+            // All audio chunks sent — queue drains naturally
             break;
-        case 'tts_end':
-            // Audio stream done — let queue drain naturally
-            break;
-        case 'stop_audio':
-        case 'barge_detected':
-        case 'cancelled':
+        case 'barge_in_ack':
             stopAI();
             clearInterim();
+            isAISpeaking = false;
             isProcessing = false;
             isListening = callActive;
             updateMicUI();
             break;
+        case 'properties':
+            if (msg.data && msg.data.length) {
+                console.log('[properties] Received:', msg.data.length);
+                renderPropertyCards(msg.data);
+            }
+            break;
         case 'error':
-            hideProc();
             removeTyping();
             isProcessing = false;
             addMsg('Error: ' + (msg.message || 'Unknown error'), 'assistant');
             break;
-        case 'rx_info':
-        case 'asr_partial_info':
-        case 'first_speech':
-            break; // informational only
         default:
             console.log('[WS] unhandled type:', msg.type);
     }
@@ -924,87 +902,62 @@ function setConnStatus(s) {
     }
 }
 
-/* ── Audio Playback (PCM16 streaming from server) ── */
-let playCtx = null, curSrc = null, playGen = 0, qRunning = false;
-let _pcmQueue = []; // queued Float32Array buffers ready to play
-let _pcmAccum = new Int16Array(0); // accumulate incoming PCM16 chunks
+/* ── Audio Playback (base64 WAV from server) ── */
+let _audioQueue = [], _audioPlaying = false;
 
-function getPlayCtx() {
-    if (!playCtx || playCtx.state === 'closed') playCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (playCtx.state === 'suspended') playCtx.resume();
-    return playCtx;
+function playBase64Audio(b64) {
+    _audioQueue.push(b64);
+    if (!_audioPlaying) drainAudio();
 }
 
-let _preUnlockBuffer = []; // store PCM before AudioContext is unlocked
-
-function handlePCMAudio(arrayBuf) {
-    // Server sends raw PCM16 LE at _ttsRate (24000 Hz), 1 channel
-    const myGen = playGen;
-    const i16 = new Int16Array(arrayBuf);
-    const f32 = new Float32Array(i16.length);
-    for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768.0;
-    // If AudioContext not yet unlocked, buffer for later replay
-    if (!playCtx || playCtx.state === 'suspended') {
-        _preUnlockBuffer.push({ f32, gen: myGen });
+function drainAudio() {
+    if (!_audioQueue.length) {
+        _audioPlaying = false;
         return;
     }
-    _pcmQueue.push({ f32, gen: myGen });
-    if (!qRunning) drainPCM();
-}
-
-function drainPCM() {
-    if (qRunning || !_pcmQueue.length) return;
-    const item = _pcmQueue.shift();
-    if (item.gen !== playGen) { drainPCM(); return; }
-    qRunning = true;
-    const ctx = getPlayCtx();
-    const buf = ctx.createBuffer(1, item.f32.length, _ttsRate);
-    buf.copyToChannel(item.f32, 0);
-    curSrc = ctx.createBufferSource();
-    curSrc.buffer = buf;
-    curSrc.connect(ctx.destination);
-    curSrc.onended = () => {
-        if (playGen !== item.gen) { qRunning = false; return; }
-        curSrc = null;
-        qRunning = false;
-        if (_pcmQueue.length) {
-            drainPCM();
+    _audioPlaying = true;
+    const b64 = _audioQueue.shift();
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    currentAudio = new Audio(url);
+    currentAudio.onended = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        if (_audioQueue.length) {
+            drainAudio();
         } else {
-            // Queue empty — AI done speaking
+            _audioPlaying = false;
             isAISpeaking = false;
             isListening = callActive;
             updateMicUI();
         }
     };
-    curSrc.start(0);
+    currentAudio.onerror = () => {
+        URL.revokeObjectURL(url);
+        currentAudio = null;
+        drainAudio();
+    };
+    currentAudio.play().catch(e => console.error('[audio] play error:', e));
 }
 
 function stopAI() {
-    playGen++;
-    _pcmQueue = [];
-    qRunning = false;
-    if (curSrc) { try { curSrc.stop(); } catch (e) {} curSrc = null; }
-    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    _audioQueue = [];
+    _audioPlaying = false;
+    if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; currentAudio = null; }
     isAISpeaking = false;
 }
 
 /* ── Barge-in ── */
-let biActive = false, biFrames = 0;
-const BI_THRESH = 8, BI_FRAMES = 4;
-function startBargeMonitor() { if (biActive || !analyser || !callActive) return; biActive = true; biFrames = 0; monitorBarge(); }
-function stopBargeMonitor()  { biActive = false; biFrames = 0; }
-function monitorBarge() {
-    if (!biActive || !isAISpeaking || !analyser) { biActive = false; return; }
-    const d = new Uint8Array(analyser.fftSize); analyser.getByteTimeDomainData(d);
-    let s = 0; for (let i = 0; i < d.length; i++) { const v = (d[i] - 128) / 128; s += v * v; }
-    const rms = Math.sqrt(s / d.length) * 100;
-    if (rms > BI_THRESH) { if (++biFrames >= BI_FRAMES) { triggerBarge(); return; } } else { biFrames = 0; }
-    requestAnimationFrame(monitorBarge);
-}
+let biActive = false;
+function startBargeMonitor() { biActive = true; }
+function stopBargeMonitor()  { biActive = false; }
 function triggerBarge() {
     if (!isAISpeaking) return;
     stopBargeMonitor(); stopAI();
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'cancel' }));
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'barge_in' }));
 }
 
 /* ── Interim Transcript ── */
@@ -1053,34 +1006,18 @@ async function startCall() {
     if (callActive) return;
     callActive = true;
     try {
-        // Create and resume playback AudioContext on user gesture (required by browsers)
-        if (!playCtx || playCtx.state === 'closed') {
-            playCtx = new (window.AudioContext || window.webkitAudioContext)();
-            console.log('[audio] created new playback AudioContext');
-        }
-        if (playCtx.state === 'suspended') {
-            console.log('[audio] resuming playback AudioContext, state:', playCtx.state);
-            await playCtx.resume();
-            console.log('[audio] resumed, new state:', playCtx.state);
-        }
         micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioContext.state === 'suspended') await audioContext.resume();
-        const rate = audioContext.sampleRate;
-        sourceNode = audioContext.createMediaStreamSource(micStream);
-        processor  = audioContext.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = e => {
-            const out = e.outputBuffer.getChannelData(0); for (let j = 0; j < out.length; j++) out[j] = 0;
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+        mediaRecorder = new MediaRecorder(micStream, { mimeType });
+        mediaRecorder.ondataavailable = async e => {
             if (!callActive || !ws || ws.readyState !== WebSocket.OPEN || !wsReady) return;
-            const inp = e.inputBuffer.getChannelData(0);
-            const i16 = new Int16Array(inp.length);
-            for (let i = 0; i < inp.length; i++) { const s = Math.max(-1, Math.min(1, inp[i])); i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF; }
-            ws.send(i16.buffer);
+            if (e.data && e.data.size > 0) {
+                const buf = await e.data.arrayBuffer();
+                const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+                ws.send(JSON.stringify({ type: 'audio', data: b64 }));
+            }
         };
-        sourceNode.connect(processor); processor.connect(audioContext.destination);
-        analyser = audioContext.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.3;
-        sourceNode.connect(analyser);
-        try { const p = getPlayCtx(), b = p.createBuffer(1, 1, 22050), s = p.createBufferSource(); s.buffer = b; s.connect(p.destination); s.start(); } catch (e) {}
+        mediaRecorder.start(250); // send chunks every 250ms
         isListening = true; updateMicUI();
     } catch (err) {
         console.error('[CALL]', err);
@@ -1091,18 +1028,16 @@ async function startCall() {
 
 function endCall() {
     callActive = false; stopBargeMonitor(); stopAI(); clearInterim();
-    if (processor)   { processor.disconnect();  processor  = null; }
-    if (sourceNode)  { sourceNode.disconnect();  sourceNode = null; }
-    if (micStream)   { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-    analyser = null;
-    if (audioContext) { audioContext.close().catch(() => {}); audioContext = null; }
-    isProcessing = false; isListening = false; hideProc(); updateMicUI();
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') { mediaRecorder.stop(); }
+    mediaRecorder = null;
+    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    isProcessing = false; isListening = false; updateMicUI();
 }
 
 function handleMicClick() {
     if (mode !== 'voice') return;
     if (!callActive)       startCall();
-    else if (isAISpeaking) triggerBarge();
+    else if (isAISpeaking) { triggerBarge(); }
     else                   endCall();
 }
 
@@ -1376,31 +1311,7 @@ function onLangChange(lang) {
 }
 
 /* ── Boot ── */
-// Defer WS connect until first user click so AudioContext is unlocked
-// before the server's greeting audio arrives (browsers block autoplay).
-let _wsStarted = false;
-async function _unlockAndConnect() {
-    if (!playCtx || playCtx.state === 'closed') {
-        playCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    if (playCtx.state === 'suspended') {
-        await playCtx.resume();
-    }
-    // Flush any audio that arrived before unlock
-    if (_preUnlockBuffer.length) {
-        console.log('[audio] flushing', _preUnlockBuffer.length, 'pre-unlock buffers');
-        for (const item of _preUnlockBuffer) {
-            _pcmQueue.push(item);
-        }
-        _preUnlockBuffer = [];
-        if (!qRunning) drainPCM();
-    }
-    if (!_wsStarted) {
-        _wsStarted = true;
-        connectWS();
-    }
-}
-document.addEventListener('click', _unlockAndConnect, { once: false });
+connectWS();
 </script>
 </body>
 </html>
