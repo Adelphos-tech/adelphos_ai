@@ -858,7 +858,7 @@ function handleWSMsg(msg) {
             }
             break;
         case 'ai_audio':
-            playBase64Audio(msg.data);
+            handleAiAudio(msg);
             break;
         case 'ai_audio_done':
             // All audio chunks sent — queue drains naturally
@@ -902,11 +902,64 @@ function setConnStatus(s) {
     }
 }
 
-/* ── Audio Playback (base64 WAV from server) ── */
+/* ── Audio Playback (base64 WAV chunks from server) ── */
 let _audioQueue = [], _audioPlaying = false;
+let _chunkMap = {}; // sentence_idx -> { chunks: [], total }
 
-function playBase64Audio(b64) {
-    _audioQueue.push(b64);
+function handleAiAudio(msg) {
+    const sid = msg.sentence_idx;
+    const ci  = msg.chunk_index;
+    const tot = msg.total_chunks;
+
+    if (tot === 1) {
+        // Single chunk — play immediately
+        enqueueB64(msg.data);
+        return;
+    }
+
+    // Multi-chunk: accumulate until all arrive
+    if (!_chunkMap[sid]) _chunkMap[sid] = { chunks: [], total: tot };
+    _chunkMap[sid].chunks[ci] = msg.data;
+
+    const entry = _chunkMap[sid];
+    const received = entry.chunks.filter(c => c !== undefined).length;
+    if (received < entry.total) return; // still waiting
+
+    // All chunks arrived — concatenate raw bytes (skip WAV headers on chunks 1+)
+    const allBytes = [];
+    for (let i = 0; i < entry.total; i++) {
+        const b64 = entry.chunks[i];
+        const bin = atob(b64);
+        if (i === 0) {
+            // First chunk has the real WAV header — keep all bytes
+            for (let j = 0; j < bin.length; j++) allBytes.push(bin.charCodeAt(j));
+        } else {
+            // Subsequent chunks: skip the 44-byte WAV header, append only PCM data
+            for (let j = 44; j < bin.length; j++) allBytes.push(bin.charCodeAt(j));
+        }
+    }
+    delete _chunkMap[sid];
+
+    // Fix WAV data-chunk size in header to reflect total bytes
+    const wavBytes = new Uint8Array(allBytes);
+    const dataSize = wavBytes.length - 44;
+    const view = new DataView(wavBytes.buffer);
+    view.setUint32(4,  wavBytes.length - 8, true);  // RIFF chunk size
+    view.setUint32(40, dataSize, true);              // data sub-chunk size
+
+    const blob = new Blob([wavBytes], { type: 'audio/wav' });
+    enqueueBlob(blob);
+}
+
+function enqueueB64(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    enqueueBlob(new Blob([bytes], { type: 'audio/wav' }));
+}
+
+function enqueueBlob(blob) {
+    _audioQueue.push(blob);
     if (!_audioPlaying) drainAudio();
 }
 
@@ -916,11 +969,7 @@ function drainAudio() {
         return;
     }
     _audioPlaying = true;
-    const b64 = _audioQueue.shift();
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'audio/wav' });
+    const blob = _audioQueue.shift();
     const url = URL.createObjectURL(blob);
     currentAudio = new Audio(url);
     currentAudio.onended = () => {
@@ -945,6 +994,7 @@ function drainAudio() {
 
 function stopAI() {
     _audioQueue = [];
+    _chunkMap = {};
     _audioPlaying = false;
     if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; currentAudio = null; }
     isAISpeaking = false;
