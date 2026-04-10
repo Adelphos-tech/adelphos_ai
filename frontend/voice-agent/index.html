@@ -935,14 +935,19 @@ function getPlayCtx() {
     return playCtx;
 }
 
+let _preUnlockBuffer = []; // store PCM before AudioContext is unlocked
+
 function handlePCMAudio(arrayBuf) {
     // Server sends raw PCM16 LE at _ttsRate (24000 Hz), 1 channel
-    // Accumulate and schedule playback
     const myGen = playGen;
     const i16 = new Int16Array(arrayBuf);
-    // Convert to float32
     const f32 = new Float32Array(i16.length);
     for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768.0;
+    // If AudioContext not yet unlocked, buffer for later replay
+    if (!playCtx || playCtx.state === 'suspended') {
+        _preUnlockBuffer.push({ f32, gen: myGen });
+        return;
+    }
     _pcmQueue.push({ f32, gen: myGen });
     if (!qRunning) drainPCM();
 }
@@ -1371,22 +1376,31 @@ function onLangChange(lang) {
 }
 
 /* ── Boot ── */
-connectWS();
-
-// Auto-resume AudioContext on first user interaction (required by browsers)
-let audioContextResumed = false;
-document.addEventListener('click', async () => {
+// Defer WS connect until first user click so AudioContext is unlocked
+// before the server's greeting audio arrives (browsers block autoplay).
+let _wsStarted = false;
+async function _unlockAndConnect() {
     if (!playCtx || playCtx.state === 'closed') {
         playCtx = new (window.AudioContext || window.webkitAudioContext)();
-        console.log('[audio] created playback AudioContext on click');
     }
-    if (playCtx && playCtx.state === 'suspended' && !audioContextResumed) {
-        console.log('[audio] auto-resuming AudioContext on first click, state:', playCtx.state);
+    if (playCtx.state === 'suspended') {
         await playCtx.resume();
-        audioContextResumed = true;
-        console.log('[audio] resumed on click, new state:', playCtx.state);
     }
-}, { once: false });
+    // Flush any audio that arrived before unlock
+    if (_preUnlockBuffer.length) {
+        console.log('[audio] flushing', _preUnlockBuffer.length, 'pre-unlock buffers');
+        for (const item of _preUnlockBuffer) {
+            _pcmQueue.push(item);
+        }
+        _preUnlockBuffer = [];
+        if (!qRunning) drainPCM();
+    }
+    if (!_wsStarted) {
+        _wsStarted = true;
+        connectWS();
+    }
+}
+document.addEventListener('click', _unlockAndConnect, { once: false });
 </script>
 </body>
 </html>
