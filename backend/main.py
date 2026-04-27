@@ -9,6 +9,7 @@ import re
 import io
 import wave
 from typing import Optional
+import numpy as np
 
 print("[STARTUP] Loading Adelphos Voice Agent...", flush=True)
 
