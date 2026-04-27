@@ -1,8 +1,7 @@
 import os
 import re
 import httpx
-from deepgram import DeepgramClient
-from deepgram.audio import PrerecordedOptions
+from deepgram import DeepgramClient, PrerecordedOptions
 from dotenv import load_dotenv
 
 load_dotenv()
