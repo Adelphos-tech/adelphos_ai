@@ -13,7 +13,11 @@ if _qdrant_available:
     try:
         from qdrant_client import AsyncQdrantClient
         from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
-        from sentence_transformers import SentenceTransformer
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            print("[QDRANT] sentence-transformers not installed. Mock mode only.")
+            raise Exception("sentence-transformers not available")
         import time as _time
         COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
         EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
