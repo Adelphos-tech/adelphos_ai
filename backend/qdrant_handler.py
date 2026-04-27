@@ -1,48 +1,12 @@
 import os
 import re
-import asyncio
-from functools import lru_cache
 from dotenv import load_dotenv
 
 load_dotenv()
 
-QDRANT_URL = os.getenv("QDRANT_URL", "")
-_qdrant_available = bool(QDRANT_URL)
-
-if _qdrant_available:
-    try:
-        from qdrant_client import AsyncQdrantClient
-        from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            print("[QDRANT] sentence-transformers not installed. Mock mode only.")
-            raise Exception("sentence-transformers not available")
-        import time as _time
-        COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
-        EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
-        print(f"[QDRANT] Loading embedding model {EMBED_MODEL}...")
-        _t0 = _time.time()
-        _model: SentenceTransformer = SentenceTransformer(EMBED_MODEL)
-        _model.encode("singapore property", convert_to_numpy=True)
-        print(f"[QDRANT] Model ready in {int((_time.time()-_t0)*1000)}ms")
-        _client = None
-        def _get_client() -> AsyncQdrantClient:
-            global _client
-            if _client is None:
-                _client = AsyncQdrantClient(url=QDRANT_URL)
-            return _client
-        @lru_cache(maxsize=256)
-        def _encode_cached(text: str) -> tuple:
-            return tuple(_model.encode(text).tolist())
-        async def _encode_async(text: str):
-            loop = asyncio.get_event_loop()
-            return list(await loop.run_in_executor(None, _encode_cached, text))
-    except Exception as e:
-        print(f"[QDRANT] Failed to load: {e}. Property search disabled.")
-        _qdrant_available = False
-else:
-    print("[QDRANT] No QDRANT_URL set — property search disabled. Using mock properties for demo.")
+# For Render deployment - use mock data only (no heavy ML libraries)
+_qdrant_available = False
+print("[QDRANT] Using mock properties for demo mode.")
 
 # ─── Mock Properties for Demo (when Qdrant is not configured) ───
 MOCK_PROPERTIES = [
@@ -260,8 +224,6 @@ LOCATION_ALIASES = {
     "d1": ["district 1", "D01"],
     "d2": ["district 2", "D02"],
     "d3": ["district 3", "D03"],
-    "d4": ["district 4", "D04"],
-    "d5": ["district 5", "D05"],
     "d10": ["district 10", "D10"],
     "d11": ["district 11", "D11"],
     "d15": ["district 15", "D15"],
@@ -337,30 +299,6 @@ def _extract_filters(query: str) -> dict:
     return filters
 
 
-def _build_qdrant_filter(filters: dict):
-    """Build Qdrant Filter from extracted structured filters."""
-    conditions = []
-
-    if "bedrooms" in filters:
-        conditions.append(
-            FieldCondition(key="bedrooms", match=MatchValue(value=filters["bedrooms"]))
-        )
-
-    if "category_slug" in filters:
-        conditions.append(
-            FieldCondition(key="category_slug", match=MatchValue(value=filters["category_slug"]))
-        )
-
-    if "max_price" in filters:
-        conditions.append(
-            FieldCondition(key="price", range=Range(lte=filters["max_price"], gt=0))
-        )
-
-    if not conditions:
-        return None
-    return Filter(must=conditions)
-
-
 def _filter_mock_properties(query: str, limit: int = 5):
     """Filter mock properties based on query keywords."""
     q = query.lower()
@@ -415,192 +353,14 @@ def _filter_mock_properties(query: str, limit: int = 5):
 
 async def search_properties(query: str, limit: int = 5):
     """
-    Async hybrid search: vector similarity + payload filters.
-    Falls back to pure vector search if filtered search returns too few results.
-    Falls back to mock properties when Qdrant is not configured.
+    Search properties - uses mock data for Render deployment.
     """
-    # Return mock properties if Qdrant is not available
-    if not _qdrant_available:
-        print(f"[QDRANT] Using mock properties for query: '{query[:50]}...'")
-        return _filter_mock_properties(query, limit)
-
-    t0 = _time.time()
-
-    vector = await _encode_async(query)
-    t_enc = _time.time()
-
-    filters = _extract_filters(query)
-    qdrant_filter = _build_qdrant_filter(filters)
-
-    client = _get_client()
-    results = await client.search(
-        collection_name=COLLECTION_NAME,
-        query_vector=vector,
-        query_filter=qdrant_filter,
-        limit=limit * 3,
-        with_payload=True,
-    )
-
-    # Fallback to unfiltered if too few results
-    if len(results) < 2 and qdrant_filter:
-        print(f"[QDRANT] Filtered search returned {len(results)}, falling back to unfiltered")
-        results = await client.search(
-            collection_name=COLLECTION_NAME,
-            query_vector=vector,
-            limit=limit * 3,
-            with_payload=True,
-        )
-
-    # Re-rank by location match if user specified a location
-    location_terms = filters.get("location_terms", [])
-    if location_terms:
-        def location_boost(hit):
-            p = hit.payload
-            text = f"{p.get('district', '')} {p.get('address', '')} {p.get('title', '')} {p.get('content', '')}".lower()
-            for term in location_terms:
-                if term.lower() in text:
-                    return hit.score + 0.5
-            return hit.score
-        results.sort(key=location_boost, reverse=True)
-
-    properties = []
-    seen_urls = set()
-    for hit in results[:limit * 2]:
-        p = hit.payload
-        url = p.get("url", "") or p.get("url_slug", "")
-        # Deduplicate by URL
-        if url and url in seen_urls:
-            continue
-        if url:
-            seen_urls.add(url)
-        if len(properties) >= limit:
-            break
-
-        price_raw = p.get("price") or 0
-        try:
-            price_display = f"SGD {int(float(price_raw)):,}" if price_raw else "Price on request"
-        except (ValueError, TypeError):
-            price_display = p.get("price_raw", "Price on request")
-
-        # Use price_raw string if available for display (e.g. "SGD2218888")
-        if p.get("price_raw") and price_raw:
-            price_display = p.get("price_raw", price_display)
-
-        prop = {
-            "title": p.get("title", ""),
-            "address": p.get("address", ""),
-            "district": p.get("district", ""),
-            "category": p.get("category", ""),
-            "property_type": p.get("property_type", ""),
-            "bedrooms": p.get("bedrooms", ""),
-            "bathrooms": p.get("bathrooms", ""),
-            "floor_area": p.get("floor_area", ""),
-            "floor_area_raw": p.get("floor_area_raw", ""),
-            "price": price_raw,
-            "display_price": price_display,
-            "price_raw": p.get("price_raw", ""),
-            "psf": p.get("raw_details", {}).get("Psf", "") if isinstance(p.get("raw_details"), dict) else "",
-            "tenure": p.get("tenure", ""),
-            "listed_date": p.get("listed_date", ""),
-            "agent_name": p.get("agent_name", ""),
-            "agent_agency": p.get("agent_agency", ""),
-            "description": (p.get("description", "") or "")[:300],
-            "image_url": next((u for u in (p.get("all_image_urls") or []) if "/agent/" not in u), ""),
-            "all_image_urls": [u for u in (p.get("all_image_urls") or []) if "/agent/" not in u],
-            "agent_image": next((u for u in (p.get("all_image_urls") or []) if "/agent/" in u), p.get("image_url", "")),
-            "url": p.get("url", ""),
-            "score": round(hit.score, 3),
-        }
-        properties.append(prop)
-
-    t_done = _time.time()
-    print(f"[QDRANT] Query: '{query[:60]}' → {len(properties)} results | encode={int((t_enc-t0)*1000)}ms search={int((t_done-t_enc)*1000)}ms total={int((t_done-t0)*1000)}ms")
-    return properties
+    # Always use mock properties for Render
+    print(f"[QDRANT] Using mock properties for query: '{query[:50]}...'")
+    return _filter_mock_properties(query, limit)
 
 
-async def ingest_properties_from_file(file_path: str) -> dict:
-    """
-    Ingest properties from an Excel or CSV file into Qdrant.
-    Expected columns: title, address, district, price, bedrooms, bathrooms,
-    floor_area, property_type, category, tenure, description, url, image_url, agent_name, agent_agency
-    """
-    import pandas as pd
-    import uuid as _uuid
-    from qdrant_client.models import PointStruct
-
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == '.csv':
-        df = pd.read_csv(file_path)
-    else:
-        df = pd.read_excel(file_path)
-
-    # Normalize column names
-    df.columns = [c.strip().lower().replace(' ', '_') for c in df.columns]
-
-    required = ['title']
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        return {"error": f"Missing required columns: {missing}", "total_rows": len(df), "inserted": 0}
-
-    model = await _get_model()
-    client = _get_client()
-
-    points = []
-    errors = 0
-    for idx, row in df.iterrows():
-        try:
-            title = str(row.get('title', '')).strip()
-            if not title:
-                errors += 1
-                continue
-
-            # Build text for embedding
-            parts = [title]
-            for col in ['address', 'district', 'property_type', 'category', 'description']:
-                val = str(row.get(col, '')).strip()
-                if val and val.lower() != 'nan':
-                    parts.append(val)
-            embed_text = ' '.join(parts)
-
-            vector = model.encode(embed_text).tolist()
-
-            payload = {}
-            for col in df.columns:
-                val = row.get(col)
-                if pd.notna(val):
-                    payload[col] = str(val).strip() if isinstance(val, str) else val
-
-            # Handle image URLs
-            if 'image_url' in payload and isinstance(payload['image_url'], str):
-                payload['all_image_urls'] = [u.strip() for u in payload['image_url'].split(',') if u.strip()]
-
-            point_id = str(_uuid.uuid4())
-            points.append(PointStruct(
-                id=point_id,
-                vector=vector,
-                payload=payload
-            ))
-        except Exception as e:
-            print(f"[QDRANT INGEST] Row {idx} error: {e}")
-            errors += 1
-
-    if points:
-        # Upsert in batches of 100
-        batch_size = 100
-        for i in range(0, len(points), batch_size):
-            batch = points[i:i+batch_size]
-            await client.upsert(collection_name=COLLECTION_NAME, points=batch)
-            print(f"[QDRANT INGEST] Inserted batch {i//batch_size + 1} ({len(batch)} points)")
-
-    return {
-        "message": "Property data ingested successfully",
-        "total_rows": len(df),
-        "inserted": len(points),
-        "errors": errors,
-    }
-
-
-def format_properties_for_llm(properties) -> str:
+def format_properties_for_llm(properties):
     """Format Singapore property search results as context for the LLM."""
     if not properties:
         return ""
