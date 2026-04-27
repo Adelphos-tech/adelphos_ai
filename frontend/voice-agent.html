@@ -434,9 +434,8 @@
 })();
 
 /* ═══════════════ APP STATE ═══════════════ */
-// When hosted on Hostinger (static), all API calls go to the Render backend.
-// On localhost the origin itself is the backend.
-const API_URL = window.location.origin;
+// API base URL for the backend
+const API_URL = 'https://assistant.apilproperties.com';
 
 let chatId = null, mode = 'voice';
 let ws = null, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
@@ -465,7 +464,7 @@ function sendChip(el) {
 
 /* ── WebSocket ── */
 function connectWS() {
-    const wsBase = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+    const wsBase = 'wss://assistant.apilproperties.com';
 
     ws = new WebSocket(`${wsBase}/ws/voice`);
     ws.onopen  = () => { setConnStatus('online');  if (chatId) ws.send(JSON.stringify({ type: 'set_chat_id', chat_id: chatId })); };

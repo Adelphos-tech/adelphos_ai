@@ -1,57 +1,211 @@
 import os
 import re
 import asyncio
-import time as _time
 from functools import lru_cache
-from qdrant_client import AsyncQdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
-from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 
 load_dotenv()
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+QDRANT_URL = os.getenv("QDRANT_URL", "")
+_qdrant_available = bool(QDRANT_URL)
 
-# Eagerly load model at import time — eliminates 3-4s cold-start on first query
-print(f"[QDRANT] Loading embedding model {EMBED_MODEL}...")
-_t0 = _time.time()
-_model: SentenceTransformer = SentenceTransformer(EMBED_MODEL)
-# Warm-up encode so PyTorch JIT is hot before first real query
-_model.encode("singapore property", convert_to_numpy=True)
-print(f"[QDRANT] Model ready in {int((_time.time()-_t0)*1000)}ms")
+if _qdrant_available:
+    try:
+        from qdrant_client import AsyncQdrantClient
+        from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+        from sentence_transformers import SentenceTransformer
+        import time as _time
+        COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "NEW_PROPERTIES_S")
+        EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
+        print(f"[QDRANT] Loading embedding model {EMBED_MODEL}...")
+        _t0 = _time.time()
+        _model: SentenceTransformer = SentenceTransformer(EMBED_MODEL)
+        _model.encode("singapore property", convert_to_numpy=True)
+        print(f"[QDRANT] Model ready in {int((_time.time()-_t0)*1000)}ms")
+        _client = None
+        def _get_client() -> AsyncQdrantClient:
+            global _client
+            if _client is None:
+                _client = AsyncQdrantClient(url=QDRANT_URL)
+            return _client
+        @lru_cache(maxsize=256)
+        def _encode_cached(text: str) -> tuple:
+            return tuple(_model.encode(text).tolist())
+        async def _encode_async(text: str):
+            loop = asyncio.get_event_loop()
+            return list(await loop.run_in_executor(None, _encode_cached, text))
+    except Exception as e:
+        print(f"[QDRANT] Failed to load: {e}. Property search disabled.")
+        _qdrant_available = False
+else:
+    print("[QDRANT] No QDRANT_URL set — property search disabled. Using mock properties for demo.")
 
-_client: AsyncQdrantClient | None = None
-_model_lock = asyncio.Lock()
-
-
-def _get_client() -> AsyncQdrantClient:
-    global _client
-    if _client is None:
-        _client = AsyncQdrantClient(url=QDRANT_URL)
-        print(f"[QDRANT] Client connected to {QDRANT_URL}")
-    return _client
-
-
-async def _get_model() -> SentenceTransformer:
-    return _model
-
-
-@lru_cache(maxsize=256)
-def _encode_cached(text: str) -> tuple:
-    """CPU-bound embedding with LRU cache. Returns tuple (hashable) for caching."""
-    assert _model is not None, "Model not loaded yet"
-    return tuple(_model.encode(text).tolist())
-
-
-async def _encode_async(text: str) -> list[float]:
-    """Run SentenceTransformer encoding in thread executor to avoid blocking."""
-    await _get_model()  # ensure model loaded
-    loop = asyncio.get_event_loop()
-    vec = await loop.run_in_executor(None, _encode_cached, text)
-    return list(vec)
-
+# ─── Mock Properties for Demo (when Qdrant is not configured) ───
+MOCK_PROPERTIES = [
+    {
+        "title": "Luxury Condo at Marina One Residences",
+        "address": "21 Marina Way",
+        "district": "D01 - Marina Bay",
+        "category": "for-sale",
+        "property_type": "Condominium",
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "floor_area": 1200,
+        "floor_area_raw": "1,200 sqft",
+        "price": 3200000,
+        "display_price": "SGD 3,200,000",
+        "price_raw": "SGD3,200,000",
+        "psf": "SGD 2,667 psf",
+        "tenure": "99-year Leasehold",
+        "listed_date": "Jan 2025",
+        "agent_name": "Mohamed Habib",
+        "agent_agency": "APIL Properties",
+        "description": "Stunning 3-bedroom unit at Marina One Residences with breathtaking views of Marina Bay. Premium finishes, smart home features, and access to world-class facilities including sky gardens and swimming pools.",
+        "image_url": "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800&h=600&fit=crop",
+        "all_image_urls": [
+            "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&h=600&fit=crop"
+        ],
+        "url": "https://apilproperties.com/listings/marina-one",
+        "score": 0.95,
+    },
+    {
+        "title": "Modern HDB BTO at Tampines GreenVerge",
+        "address": "Tampines Street 86",
+        "district": "D18 - Tampines",
+        "category": "for-sale",
+        "property_type": "HDB",
+        "bedrooms": 4,
+        "bathrooms": 2,
+        "floor_area": 1100,
+        "floor_area_raw": "1,100 sqft",
+        "price": 680000,
+        "display_price": "SGD 680,000",
+        "price_raw": "SGD680,000",
+        "psf": "SGD 618 psf",
+        "tenure": "99-year Leasehold",
+        "listed_date": "Feb 2025",
+        "agent_name": "Mohamed Habib",
+        "agent_agency": "APIL Properties",
+        "description": "Spacious 4-room HDB BTO flat in the vibrant Tampines estate. Close to Tampines Mall, Century Square, and MRT station. Modern design with efficient layout perfect for families.",
+        "image_url": "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=800&h=600&fit=crop",
+        "all_image_urls": [
+            "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&h=600&fit=crop"
+        ],
+        "url": "https://apilproperties.com/listings/tampines-bto",
+        "score": 0.88,
+    },
+    {
+        "title": "Prestigious Landed Home at Bukit Timah",
+        "address": "Jalan Serene",
+        "district": "D11 - Bukit Timah",
+        "category": "for-sale",
+        "property_type": "Semi-Detached",
+        "bedrooms": 5,
+        "bathrooms": 4,
+        "floor_area": 3500,
+        "floor_area_raw": "3,500 sqft",
+        "price": 6500000,
+        "display_price": "SGD 6,500,000",
+        "price_raw": "SGD6,500,000",
+        "psf": "SGD 1,857 psf",
+        "tenure": "Freehold",
+        "listed_date": "Jan 2025",
+        "agent_name": "Mohamed Habib",
+        "agent_agency": "APIL Properties",
+        "description": "Elegant semi-detached house in the prestigious Bukit Timah estate. Features a private pool, home lift, and lush garden. Near top schools like Nanyang Primary and Raffles Girls.",
+        "image_url": "https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=800&h=600&fit=crop",
+        "all_image_urls": [
+            "https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1600566753086-00f18fb6b3ea?w=800&h=600&fit=crop"
+        ],
+        "url": "https://apilproperties.com/listings/bukit-timah-landed",
+        "score": 0.92,
+    },
+    {
+        "title": "Cozy Studio at Orchard Residences",
+        "address": "238 Orchard Boulevard",
+        "district": "D09 - Orchard",
+        "category": "for-rent",
+        "property_type": "Condominium",
+        "bedrooms": 1,
+        "bathrooms": 1,
+        "floor_area": 500,
+        "floor_area_raw": "500 sqft",
+        "price": 3800,
+        "display_price": "SGD 3,800/mo",
+        "price_raw": "SGD3,800/month",
+        "psf": "SGD 7.60 psf",
+        "tenure": "99-year Leasehold",
+        "listed_date": "Mar 2025",
+        "agent_name": "Mohamed Habib",
+        "agent_agency": "APIL Properties",
+        "description": "Modern studio apartment in the heart of Orchard Road. Direct access to ION Orchard and MRT. Fully furnished with high-end appliances. Perfect for professionals.",
+        "image_url": "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&h=600&fit=crop",
+        "all_image_urls": [
+            "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?w=800&h=600&fit=crop"
+        ],
+        "url": "https://apilproperties.com/listings/orchard-studio",
+        "score": 0.85,
+    },
+    {
+        "title": "3-Bedroom HDB Flat for Rent at Punggol",
+        "address": "Sumang Walk, Punggol",
+        "district": "D19 - Punggol",
+        "category": "for-rent",
+        "property_type": "HDB",
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "floor_area": 1000,
+        "floor_area_raw": "1,000 sqft",
+        "price": 3200,
+        "display_price": "SGD 3,200/mo",
+        "price_raw": "SGD3,200/month",
+        "psf": "SGD 3.20 psf",
+        "tenure": "99-year Leasehold",
+        "listed_date": "Feb 2025",
+        "agent_name": "Mohamed Habib",
+        "agent_agency": "APIL Properties",
+        "description": "Spacious 3-bedroom HDB flat in Punggol's waterfront district. Recently renovated with modern fittings. Walking distance to Punggol MRT, Waterway Point mall, and Punggol Waterway Park. Perfect for families.",
+        "image_url": "https://images.unsplash.com/photo-1600566753151-384129cf4e3e?w=800&h=600&fit=crop",
+        "all_image_urls": [
+            "https://images.unsplash.com/photo-1600566753151-384129cf4e3e?w=800&h=600&fit=crop",
+            "https://images.unsplash.com/photo-1600573472550-8090b5e0745e?w=800&h=600&fit=crop"
+        ],
+        "url": "https://apilproperties.com/listings/punggol-hdb-rent",
+        "score": 0.90,
+    },
+    {
+        "title": "Spacious HDB at Ang Mo Kio",
+        "address": "Ang Mo Kio Avenue 10",
+        "district": "D20 - Ang Mo Kio",
+        "category": "for-rent",
+        "property_type": "HDB",
+        "bedrooms": 3,
+        "bathrooms": 2,
+        "floor_area": 900,
+        "floor_area_raw": "900 sqft",
+        "price": 3200,
+        "display_price": "SGD 3,200/mo",
+        "price_raw": "SGD3,200/month",
+        "psf": "SGD 3.56 psf",
+        "tenure": "99-year Leasehold",
+        "listed_date": "Mar 2025",
+        "agent_name": "Mohamed Habib",
+        "agent_agency": "APIL Properties",
+        "description": "Well-maintained 3-room HDB flat in mature Ang Mo Kio estate. Close to AMK Hub, MRT, and top schools. Partially furnished with renovated kitchen.",
+        "image_url": "https://images.unsplash.com/photo-1600047509807-ba8f99d2cdde?w=800&h=600&fit=crop",
+        "all_image_urls": [
+            "https://images.unsplash.com/photo-1600047509807-ba8f99d2cdde?w=800&h=600&fit=crop"
+        ],
+        "url": "https://apilproperties.com/listings/amk-hdb",
+        "score": 0.82,
+    },
+]
 
 # ─── Singapore district/area alias map ───
 LOCATION_ALIASES = {
@@ -179,7 +333,7 @@ def _extract_filters(query: str) -> dict:
     return filters
 
 
-def _build_qdrant_filter(filters: dict) -> Filter | None:
+def _build_qdrant_filter(filters: dict):
     """Build Qdrant Filter from extracted structured filters."""
     conditions = []
 
@@ -203,11 +357,69 @@ def _build_qdrant_filter(filters: dict) -> Filter | None:
     return Filter(must=conditions)
 
 
-async def search_properties(query: str, limit: int = 5) -> list[dict]:
+def _filter_mock_properties(query: str, limit: int = 5):
+    """Filter mock properties based on query keywords."""
+    q = query.lower()
+    filters = _extract_filters(query)
+
+    results = []
+    for p in MOCK_PROPERTIES:
+        score = 0.5  # Base score
+
+        # Check location match
+        location_terms = filters.get("location_terms", [])
+        if location_terms:
+            loc_text = f"{p.get('district', '')} {p.get('address', '')}".lower()
+            for term in location_terms:
+                if term.lower() in loc_text:
+                    score += 0.3
+                    break
+
+        # Check bedroom match
+        if "bedrooms" in filters:
+            if p.get("bedrooms") == filters["bedrooms"]:
+                score += 0.2
+
+        # Check category (sale/rent)
+        if "category_slug" in filters:
+            if p.get("category") == filters["category_slug"]:
+                score += 0.2
+
+        # Check price range
+        if "max_price" in filters:
+            price = p.get("price", 0) or 0
+            if price <= filters["max_price"]:
+                score += 0.1
+            else:
+                score -= 0.3  # Penalty for over budget
+
+        # Keyword boosts
+        keywords = ["condo", "hdb", "landed", "rent", "sale", "buy", "studio"]
+        for kw in keywords:
+            if kw in q and kw in p.get("title", "").lower():
+                score += 0.1
+
+        if score > 0.4:
+            p_copy = dict(p)
+            p_copy["score"] = round(min(score, 0.99), 3)
+            results.append(p_copy)
+
+    # Sort by score descending
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results[:limit]
+
+
+async def search_properties(query: str, limit: int = 5):
     """
     Async hybrid search: vector similarity + payload filters.
     Falls back to pure vector search if filtered search returns too few results.
+    Falls back to mock properties when Qdrant is not configured.
     """
+    # Return mock properties if Qdrant is not available
+    if not _qdrant_available:
+        print(f"[QDRANT] Using mock properties for query: '{query[:50]}...'")
+        return _filter_mock_properties(query, limit)
+
     t0 = _time.time()
 
     vector = await _encode_async(query)
@@ -384,7 +596,7 @@ async def ingest_properties_from_file(file_path: str) -> dict:
     }
 
 
-def format_properties_for_llm(properties: list[dict]) -> str:
+def format_properties_for_llm(properties) -> str:
     """Format Singapore property search results as context for the LLM."""
     if not properties:
         return ""

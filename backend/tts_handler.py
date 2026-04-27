@@ -1,17 +1,28 @@
 import os
 import io
-import re
 import wave
+import struct
 import httpx
 from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
-TTS_API_URL = os.getenv("TTS_API_URL", "http://localhost:8020/tts")
-TTS_VOICE = os.getenv("TTS_VOICE", "rizwan.wav")
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
 
-# Persistent client — reuses TCP connection, avoids ~50-100ms handshake per call
+# Voice name → Deepgram model/voice mapping
+# Deepgram Aura voices - British English closer to Singaporean accent
+# Available voices: asteria (British F), luna (British F), orion (British M),
+#                   arcas (American M), thalia (American F), helios (British M)
+VOICE_MAP = {
+    "james.wav":   {"model": "aura-helios-en", "voice": None},   # British Male - professional
+    "elena.wav": {"model": "aura-orion-en", "voice": None},  # British Male - warm
+    "marcus.wav":  {"model": "aura-asteria-en", "voice": None}, # British Female - clear
+    "zara.wav":   {"model": "aura-luna-en", "voice": None},    # British Female - friendly
+}
+DEFAULT_VOICE_KEY = os.getenv("TTS_VOICE", "james.wav")
+
+# Persistent client
 _shared_client: Optional[httpx.AsyncClient] = None
 
 
@@ -25,130 +36,71 @@ def _get_tts_client() -> httpx.AsyncClient:
     return _shared_client
 
 
-async def text_to_speech(text: str, voice: str = None) -> Optional[bytes]:
-    """
-    Convert text to speech using the local TTS API.
-    Splits long text into chunks and merges resulting WAV audio.
-    """
-    voice = voice or TTS_VOICE
-
-    # Split text into sentence-level chunks to avoid timeout
-    raw_chunks = re.split(r'([.!?]+(?:\s+|$))', text)
-
-    chunks = []
-    current_chunk = ""
-    MAX_CHUNK_LEN = 300
-
-    for part in raw_chunks:
-        if not part:
-            continue
-        if len(current_chunk) + len(part) > MAX_CHUNK_LEN and current_chunk.strip():
-            chunks.append(current_chunk.strip())
-            current_chunk = part
-        else:
-            current_chunk += part
-
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
-
-    if not chunks:
-        chunks = [text]
-
-    print(f"[TTS] Split text into {len(chunks)} chunks")
-
-    audio_segments = []
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        for i, chunk in enumerate(chunks):
-            if not chunk.strip():
-                continue
-            print(f"[TTS] Processing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
-            try:
-                response = await client.post(
-                    TTS_API_URL,
-                    json={"text": chunk, "voice": voice}
-                )
-                if response.status_code == 200:
-                    audio_segments.append(response.content)
-                else:
-                    print(f"[TTS] Chunk {i+1} failed: {response.status_code}")
-            except Exception as e:
-                print(f"[TTS] Chunk {i+1} exception: {e}")
-
-    if not audio_segments:
-        return None
-
-    # Merge WAV segments
-    try:
-        if len(audio_segments) == 1:
-            return audio_segments[0]
-
-        combined_data = io.BytesIO()
-        first_segment = io.BytesIO(audio_segments[0])
-
-        with wave.open(first_segment, 'rb') as w:
-            params = w.getparams()
-            frames = w.readframes(w.getnframes())
-
-        all_frames = [frames]
-
-        for i in range(1, len(audio_segments)):
-            try:
-                seg = io.BytesIO(audio_segments[i])
-                with wave.open(seg, 'rb') as w:
-                    all_frames.append(w.readframes(w.getnframes()))
-            except Exception as e:
-                print(f"[TTS] Error merging segment {i}: {e}")
-
-        with wave.open(combined_data, 'wb') as w:
-            w.setparams(params)
-            for f in all_frames:
-                w.writeframes(f)
-
-        final_audio = combined_data.getvalue()
-        print(f"[TTS] Merged {len(audio_segments)} segments -> {len(final_audio)} bytes")
-        return final_audio
-
-    except Exception as e:
-        print(f"[TTS] Error combining audio: {e}")
-        return audio_segments[0] if audio_segments else None
-
-
+def _pcm_to_wav(pcm_bytes: bytes, sample_rate: int = 24000, channels: int = 1, sampwidth: int = 2) -> bytes:
+    """Wrap raw PCM16 bytes in a WAV container."""
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(channels)
+        w.setsampwidth(sampwidth)
+        w.setframerate(sample_rate)
+        w.writeframes(pcm_bytes)
+    return buf.getvalue()
 
 
 async def tts_sentence(text: str, voice: str = None, client: httpx.AsyncClient = None) -> Optional[bytes]:
-    """
-    Convert a single sentence to speech. Uses persistent shared client to avoid
-    TCP handshake overhead (~50-100ms) on every call.
-    """
-    voice = voice or TTS_VOICE
+    """Convert text to speech using Deepgram TTS API. Returns WAV bytes."""
     text = text.strip()
-    if not text:
+    if not text or not DEEPGRAM_API_KEY:
         return None
+
+    voice_key = voice or DEFAULT_VOICE_KEY
+    voice_cfg = VOICE_MAP.get(voice_key, VOICE_MAP["james.wav"])
+    model = voice_cfg["model"]
+    voice_name = voice_cfg["voice"]
+
     try:
         c = client or _get_tts_client()
-        response = await c.post(TTS_API_URL, json={"text": text, "voice": voice})
-        if response.status_code == 200 and response.content:
-            return response.content
-        print(f"[TTS] tts_sentence failed: {response.status_code}")
+        # Build URL with or without voice parameter
+        url = f"https://api.deepgram.com/v1/speak?model={model}&encoding=linear16&sample_rate=24000"
+        if voice_name:
+            url += f"&voice={voice_name}"
+        resp = await c.post(
+            url,
+            headers={
+                "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={"text": text},
+            timeout=20.0,
+        )
+        if resp.status_code == 200 and resp.content:
+            # Deepgram returns raw PCM16 — wrap in WAV
+            wav = _pcm_to_wav(resp.content, sample_rate=24000)
+            print(f"[TTS] Deepgram TTS: {len(text)} chars → {len(wav)} bytes WAV")
+            return wav
+        elif resp.status_code == 403:
+            print(f"[TTS] Deepgram TTS 403: Insufficient permissions. Check your API key has TTS access.")
+            print(f"[TTS] Response: {resp.text[:300]}")
+        else:
+            print(f"[TTS] Deepgram TTS failed: {resp.status_code} {resp.text[:200]}")
         return None
     except Exception as e:
         print(f"[TTS] tts_sentence error: {e}")
         global _shared_client
-        _shared_client = None  # reset so next call gets a fresh connection
+        _shared_client = None
         return None
 
 
+async def text_to_speech(text: str, voice: str = None) -> Optional[bytes]:
+    """Convert text to speech (full text, single call)."""
+    return await tts_sentence(text, voice)
+
+
 async def get_available_voices() -> list:
-    """Get list of available TTS voices from the local TTS API."""
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            base_url = TTS_API_URL.rsplit('/tts', 1)[0]
-            response = await client.get(f"{base_url}/voices")
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("voices", [])
-            return []
-    except Exception as e:
-        print(f"[TTS] Failed to get voices: {e}")
-        return []
+    """Return available voice options."""
+    return [
+        {"id": "james.wav", "name": "James (British)"},
+        {"id": "elena.wav", "name": "Elena (British)"},
+        {"id": "marcus.wav", "name": "Marcus (British)"},
+        {"id": "zara.wav", "name": "Zara (British)"},
+    ]

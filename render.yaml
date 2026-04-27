@@ -1,6 +1,14 @@
 services:
   - type: web
-    name: adelphos-new-website
+    name: adelphos-voice-agent
     runtime: python
-    buildCommand: pip install fastapi uvicorn
-    startCommand: uvicorn serve:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    healthCheckPath: /health

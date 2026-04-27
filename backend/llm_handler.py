@@ -4,13 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
-VLLM_API_KEY = os.getenv("VLLM_API_KEY", "EMPTY")
-MODEL_NAME = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct-AWQ")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+MODEL_NAME = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
 client = OpenAI(
-    base_url=VLLM_BASE_URL,
-    api_key=VLLM_API_KEY,
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
 )
 
 SYSTEM_PROMPT = """You are a Singapore property consultant on a live voice call. Your words will be spoken aloud by a text-to-speech engine — write exactly as you would naturally speak out loud, nothing more.
@@ -63,12 +62,17 @@ Instead, react like a real human who is actually listening. Examples of good nat
 - Commas create natural pauses — use them rhythmically
 - Think out loud when appropriate: "let me think...", "so actually..."
 
-━━ PROPERTY LISTINGS ━━
-- Mention title, price, bedrooms, location naturally in speech
+━━ PROPERTY LISTINGS — CRITICAL ━━
+- You have a SPECIFIC list of available properties in the context below
+- ONLY mention properties from that list — never make up or guess other listings
+- CRITICAL: Start each sentence about a property by saying its NAME clearly
+- Example: "At Marina One Residences, you've got a 3-bedroom for 3.2 million..." or "The Punggol HDB flat is 3,200 per month..."
+- Mention exact titles, prices, bedrooms, and districts from the context
 - Say prices as: "650K SGD" or "about six fifty"
 - If currency rates in context, convert and say both: "that's roughly 480K US"
-- Mention top 2-3 listings and ask what fits best
+- Mention 2-3 specific listings that best match the user's query
 - Property cards are shown to the user automatically — don't describe images
+- Each sentence should focus on ONE property at a time for clear highlighting
 
 ━━ PROPERTY KNOWLEDGE ━━
 - HDB: public housing, most affordable, citizens/PRs
@@ -254,9 +258,9 @@ def _detect_currency_request(text: str) -> str | None:
     return None
 
 
-async def build_messages(user_text: str, chat_history: list[dict] = None) -> tuple[list[dict], list[dict]]:
+async def build_messages(user_text: str, chat_history: list[dict] = None, properties: list[dict] = None) -> tuple[list[dict], list[dict]]:
     """
-    Build the messages array for the LLM with system prompt and optional chat history.
+    Build the messages array for the LLM with system prompt, chat history, and property context.
     Returns (messages, []) — second element kept for API compatibility.
     """
     import time as _time
@@ -274,6 +278,17 @@ async def build_messages(user_text: str, chat_history: list[dict] = None) -> tup
                 if msg["role"] == "assistant" and len(content) > 400:
                     content = content[:400] + "…"
                 messages.append({"role": msg["role"], "content": content})
+
+    # Inject property context if properties are available
+    if properties:
+        from backend.qdrant_handler import format_properties_for_llm
+        property_context = format_properties_for_llm(properties)
+        if property_context:
+            messages.append({
+                "role": "system",
+                "content": f"[Current property listings available to show the user]:\n{property_context}\n\nWhen responding, mention 2-3 specific properties by name, price, and location that match the user's query. Be concise and natural."
+            })
+            print(f"[LLM] Injected {len(properties)} properties into context")
 
     # Inject currency context if user asked for conversion
     currency_code = _detect_currency_request(user_text)

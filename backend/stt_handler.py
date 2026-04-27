@@ -109,7 +109,7 @@ async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.webm") -> 
         filler_words=False,       # ignore "um", "uh" etc
         utterances=True,          # detect utterance boundaries
         diarize=False,            # single speaker, skip diarization overhead
-        keywords=TECH_KEYWORDS,  # boost domain-specific terms
+        keyterms=TECH_KEYWORDS,  # boost domain-specific terms (nova-3 uses keyterms)
     )
 
     response = await deepgram.listen.asyncrest.v("1").transcribe_file(payload, options)
