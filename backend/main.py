@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import uuid
@@ -8,21 +9,38 @@ import re
 import io
 import wave
 from typing import Optional
-import numpy as np
+
+print("[STARTUP] Loading Adelphos Voice Agent...", flush=True)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Import handlers
-from backend.stt_handler import transcribe_audio
-from backend.tts_handler import tts_sentence, get_available_voices
-from backend.llm_handler import generate_response, build_messages
-from backend.qdrant_handler import search_properties, format_properties_for_llm
+# Check required environment variables
+DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+if not DEEPGRAM_API_KEY:
+    print("[ERROR] DEEPGRAM_API_KEY not set! Please set it in Render environment variables.", flush=True)
+if not GROQ_API_KEY:
+    print("[ERROR] GROQ_API_KEY not set! Please set it in Render environment variables.", flush=True)
+
+print(f"[STARTUP] DEEPGRAM_API_KEY present: {bool(DEEPGRAM_API_KEY)}", flush=True)
+print(f"[STARTUP] GROQ_API_KEY present: {bool(GROQ_API_KEY)}", flush=True)
+
+# Import handlers (with error handling)
+try:
+    from backend.stt_handler import transcribe_audio
+    from backend.tts_handler import tts_sentence, get_available_voices
+    from backend.llm_handler import generate_response, build_messages
+    from backend.qdrant_handler import search_properties, format_properties_for_llm
+    print("[STARTUP] All handlers imported successfully", flush=True)
+except Exception as e:
+    print(f"[ERROR] Failed to import handlers: {e}", flush=True)
+    raise
 
 app = FastAPI()
 
