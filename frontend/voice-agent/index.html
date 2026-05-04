@@ -649,10 +649,8 @@
             <div class="voice-select-wrap">
                 <i class="fas fa-user-circle"></i>
                 <select id="voice-select" onchange="onVoiceChange(this.value)" title="Select AI voice">
-                    <option value="james.wav" selected>James (British)</option>
-                    <option value="elena.wav">Elena (British)</option>
-                    <option value="marcus.wav">Marcus (British)</option>
-                    <option value="zara.wav">Zara (British)</option>
+                    <option value="test.wav">Habib</option>
+                    <option value="test2.wav" selected>Shivang</option>
                 </select>
             </div>
             <div class="voice-select-wrap">
@@ -770,9 +768,10 @@
     draw();
 })();
 
+
+
 /* ═══════════════ APP STATE ═══════════════ */
-// Backend WebSocket URL - update this to your public backend URL
-const WS_URL = 'wss://adelphos-ai.onrender.com/ws/voice';
+const WS_URL = 'wss://assistant.apilproperties.com/ws/voice';
 let mode = 'voice';
 let ws = null, wsReady = false, callActive = false, isListening = false, isProcessing = false, isAISpeaking = false;
 let currentAudio = null, micStream = null, audioContext = null, sourceNode = null, processor = null;
@@ -907,23 +906,21 @@ function setConnStatus(s) {
 
 /* ── Audio Playback (base64 WAV chunks from server) ── */
 let _audioQueue = [], _audioPlaying = false;
-let _chunkMap = {}; // sentence_idx -> { chunks: [], total, property_idx }
-let _currentPlayingProperty = null; // Track currently highlighted property
+let _chunkMap = {}; // sentence_idx -> { chunks: [], total }
 
 function handleAiAudio(msg) {
     const sid = msg.sentence_idx;
     const ci  = msg.chunk_index;
     const tot = msg.total_chunks;
-    const propIdx = msg.property_idx;
 
     if (tot === 1) {
-        // Single chunk — play immediately with property highlight
-        enqueueB64(msg.data, propIdx);
+        // Single chunk — play immediately
+        enqueueB64(msg.data);
         return;
     }
 
     // Multi-chunk: accumulate until all arrive
-    if (!_chunkMap[sid]) _chunkMap[sid] = { chunks: [], total: tot, property_idx: propIdx };
+    if (!_chunkMap[sid]) _chunkMap[sid] = { chunks: [], total: tot };
     _chunkMap[sid].chunks[ci] = msg.data;
 
     const entry = _chunkMap[sid];
@@ -953,63 +950,28 @@ function handleAiAudio(msg) {
     view.setUint32(40, dataSize, true);              // data sub-chunk size
 
     const blob = new Blob([wavBytes], { type: 'audio/wav' });
-    const propertyIdx = entry.property_idx;
-    enqueueBlob(blob, propertyIdx);
+    enqueueBlob(blob);
 }
 
-function enqueueB64(b64, propIdx = null) {
+function enqueueB64(b64) {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    enqueueBlob(new Blob([bytes], { type: 'audio/wav' }), propIdx);
+    enqueueBlob(new Blob([bytes], { type: 'audio/wav' }));
 }
 
-function enqueueBlob(blob, propIdx = null) {
-    _audioQueue.push({ blob, property_idx: propIdx });
+function enqueueBlob(blob) {
+    _audioQueue.push(blob);
     if (!_audioPlaying) drainAudio();
-}
-
-function highlightPropertyByIndex(idx) {
-    // Clear previous highlight
-    if (_currentPlayingProperty !== null) {
-        const prevCard = document.querySelector(`.prop-card[data-property-id="${_currentPlayingProperty}"]`);
-        if (prevCard) prevCard.classList.remove('highlight');
-    }
-
-    // Set new highlight
-    if (idx !== null && idx !== undefined) {
-        const card = document.querySelector(`.prop-card[data-property-id="${idx}"]`);
-        if (card) {
-            card.classList.add('highlight');
-            card.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-            _currentPlayingProperty = idx;
-            console.log(`[Highlight] Property ${idx} highlighted`);
-        }
-    }
-}
-
-function clearPropertyHighlight() {
-    if (_currentPlayingProperty !== null) {
-        const card = document.querySelector(`.prop-card[data-property-id="${_currentPlayingProperty}"]`);
-        if (card) card.classList.remove('highlight');
-        _currentPlayingProperty = null;
-    }
 }
 
 function drainAudio() {
     if (!_audioQueue.length) {
         _audioPlaying = false;
-        clearPropertyHighlight();
         return;
     }
     _audioPlaying = true;
-    const item = _audioQueue.shift();
-    const blob = item.blob;
-    const propIdx = item.property_idx;
-
-    // Highlight the property being spoken about
-    highlightPropertyByIndex(propIdx);
-
+    const blob = _audioQueue.shift();
     const url = URL.createObjectURL(blob);
     currentAudio = new Audio(url);
     currentAudio.onended = () => {
@@ -1022,7 +984,6 @@ function drainAudio() {
             isAISpeaking = false;
             isListening = callActive;
             updateMicUI();
-            clearPropertyHighlight();
         }
     };
     currentAudio.onerror = () => {
@@ -1039,7 +1000,6 @@ function stopAI() {
     _audioPlaying = false;
     if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; currentAudio = null; }
     isAISpeaking = false;
-    clearPropertyHighlight();
 }
 
 /* ── Barge-in ── */
@@ -1106,17 +1066,13 @@ async function startCall() {
         processor.onaudioprocess = e => {
             const out = e.outputBuffer.getChannelData(0);
             for (let j = 0; j < out.length; j++) out[j] = 0;
-            if (!callActive || !ws || ws.readyState !== WebSocket.OPEN || !wsReady) {
-                console.log('[AUDIO] Not sending:', {callActive, ws: !!ws, wsReady, readyState: ws?.readyState});
-                return;
-            }
+            if (!callActive || !ws || ws.readyState !== WebSocket.OPEN || !wsReady) return;
             const inp = e.inputBuffer.getChannelData(0);
             const i16 = new Int16Array(inp.length);
             for (let i = 0; i < inp.length; i++) {
                 const s = Math.max(-1, Math.min(1, inp[i]));
                 i16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
-            console.log('[AUDIO] Sending', i16.buffer.byteLength, 'bytes');
             ws.send(i16.buffer);
         };
         sourceNode.connect(processor);
@@ -1400,12 +1356,7 @@ function hideProc()     { processingOvl.classList.add('hidden'); }
 function onVoiceChange(voice) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set_voice', voice: voice }));
-        const voiceNames = {
-            'james.wav': 'James',
-            'elena.wav': 'Elena',
-            'marcus.wav': 'Marcus',
-            'zara.wav': 'Zara'
-        };
+        const voiceNames = { 'test.wav': 'Habib', 'test2.wav': 'Shivang' };
         const voiceName = voiceNames[voice] || voice.replace('.wav', '');
         const announcement = `Hey, it's ${voiceName}`;
         ws.send(JSON.stringify({ type: 'announce_voice', text: announcement }));
