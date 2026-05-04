@@ -19,6 +19,8 @@ VOICE_MAP = {
     "elena.wav": {"model": "aura-orion-en", "voice": None},  # British Male - warm
     "marcus.wav":  {"model": "aura-asteria-en", "voice": None}, # British Female - clear
     "zara.wav":   {"model": "aura-luna-en", "voice": None},    # British Female - friendly
+    "test.wav":   {"model": "aura-helios-en", "voice": None},  # Habib - British Male
+    "test2.wav":  {"model": "aura-orion-en", "voice": None},  # Shivang - British Male
 }
 DEFAULT_VOICE_KEY = os.getenv("TTS_VOICE", "james.wav")
 
@@ -99,6 +101,8 @@ async def text_to_speech(text: str, voice: str = None) -> Optional[bytes]:
 async def get_available_voices() -> list:
     """Return available voice options."""
     return [
+        {"id": "test.wav", "name": "Habib"},
+        {"id": "test2.wav", "name": "Shivang"},
         {"id": "james.wav", "name": "James (British)"},
         {"id": "elena.wav", "name": "Elena (British)"},
         {"id": "marcus.wav", "name": "Marcus (British)"},

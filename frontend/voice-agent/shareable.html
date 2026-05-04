@@ -649,10 +649,8 @@
             <div class="voice-select-wrap">
                 <i class="fas fa-user-circle"></i>
                 <select id="voice-select" onchange="onVoiceChange(this.value)" title="Select AI voice">
-                    <option value="james.wav" selected>James (British)</option>
-                    <option value="elena.wav">Elena (British)</option>
-                    <option value="marcus.wav">Marcus (British)</option>
-                    <option value="zara.wav">Zara (British)</option>
+                    <option value="test.wav">Habib</option>
+                    <option value="test2.wav" selected>Shivang</option>
                 </select>
             </div>
             <div class="voice-select-wrap">
@@ -1400,12 +1398,7 @@ function hideProc()     { processingOvl.classList.add('hidden'); }
 function onVoiceChange(voice) {
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'set_voice', voice: voice }));
-        const voiceNames = {
-            'james.wav': 'James',
-            'elena.wav': 'Elena',
-            'marcus.wav': 'Marcus',
-            'zara.wav': 'Zara'
-        };
+        const voiceNames = { 'test.wav': 'Habib', 'test2.wav': 'Shivang' };
         const voiceName = voiceNames[voice] || voice.replace('.wav', '');
         const announcement = `Hey, it's ${voiceName}`;
         ws.send(JSON.stringify({ type: 'announce_voice', text: announcement }));
